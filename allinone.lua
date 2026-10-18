@@ -1171,6 +1171,13 @@ payload["/apps/tools.lua"] = [=[
 local M={}
 local SIDES={"top","bottom","left","right","front","back"}
 local TODO="/.xpultimate/todo"
+local function freeSpace()
+ if not fs.getFreeSpace then return "N/D" end
+ local ok,value=pcall(fs.getFreeSpace,"/");return ok and tostring(value) or "N/D"
+end
+local function luaMemory()
+ local ok,value=pcall(collectgarbage,"count");return ok and math.floor(tonumber(value) or 0) or 0
+end
 local function loadTasks()
  if not fs.exists(TODO) then return {} end
  local f=fs.open(TODO,"r");if not f then return {} end
@@ -1223,8 +1230,13 @@ end
 function M.lines(state)
  local page=state.page
  if page==1 then
-  local stats=fileStats("/");local free=fs.getFreeSpace and fs.getFreeSpace("/") or "N/D"
-  return {"Centro de herramientas XP","Selecciona panel con teclas 1-8","", "1. Resumen del equipo","2. Perifericos conectados","3. Control Redstone","4. Tareas","5. Calendario","6. Almacenamiento","7. Red y modem","8. Sonido","", "Hora: "..os.date("%H:%M:%S"),"Memoria Lua: "..math.floor(collectgarbage("count")).." KB","Archivos: "..stats.files.."  Carpetas: "..stats.dirs,"Espacio libre: "..tostring(free)}
+  local stats=fileStats("/");local free=freeSpace()
+  local lines={"Centro de herramientas XP","Selecciona panel con teclas 1-8","", "1. Resumen del equipo","2. Perifericos conectados","3. Control Redstone","4. Tareas","5. Calendario","6. Almacenamiento","7. Red y modem","8. Sonido",""}
+  lines[#lines+1]=string.format("Hora: %s",os.date("%H:%M:%S"))
+  lines[#lines+1]=string.format("Memoria Lua: %d KB",luaMemory())
+  lines[#lines+1]=string.format("Archivos: %s  Carpetas: %s",tostring(stats.files),tostring(stats.dirs))
+  lines[#lines+1]=string.format("Espacio libre: %s",tostring(free))
+  return lines
  elseif page==2 then
   local lines={"Perifericos detectados","Nombre | tipo",""};local list=peripherals()
   for _,p in ipairs(list) do lines[#lines+1]=p.name.." | "..p.kind end
@@ -1244,8 +1256,14 @@ function M.lines(state)
   lines[#lines+1]="Guardado local: /.xpultimate/todo";return lines
  elseif page==5 then return calendar(state)
  elseif page==6 then
-  local stats=fileStats("/");local free=fs.getFreeSpace and fs.getFreeSpace("/") or "N/D"
-  return {"Almacenamiento","Archivos encontrados (max 500): "..stats.files,"Directorios encontrados (max 500): "..stats.dirs,"Espacio libre: "..tostring(free),"Ruta de usuario: "..tostring(shell.dir()),"","Los datos se actualizan al volver a abrir este panel."}
+  local stats=fileStats("/");local free=freeSpace()
+  local lines={"Almacenamiento"}
+  lines[#lines+1]=string.format("Archivos encontrados (max 500): %s",tostring(stats.files))
+  lines[#lines+1]=string.format("Directorios encontrados (max 500): %s",tostring(stats.dirs))
+  lines[#lines+1]=string.format("Espacio libre: %s",tostring(free))
+  lines[#lines+1]=string.format("Ruta de usuario: %s",tostring(shell.dir()))
+  lines[#lines+1]="";lines[#lines+1]="Los datos se actualizan al volver a abrir este panel."
+  return lines
  elseif page==7 then
   local modems={};for _,p in ipairs(peripherals()) do if p.kind:find("modem",1,true) then modems[#modems+1]=p.name end end
   local lines={"Red y comunicaciones","HTTP API: "..tostring(http and http.get~=nil),"Modem: "..(#modems>0 and table.concat(modems,", ") or "no detectado"),"Computer ID: "..tostring(os.getComputerID and os.getComputerID() or "N/D"),"Nombre: "..tostring(os.getComputerLabel and os.getComputerLabel() or "sin etiqueta"),"", "La API HTTP depende de la configuracion del entorno."};return lines
