@@ -582,7 +582,10 @@ local function drawWindow(w)
 end
 local function redraw()
  W,H=term.getSize()
- local parent=term.current()
+ -- window.create necesita un terminal nativo. El espejo sirve para
+ -- duplicar salida, pero algunos monitores/terminales mÃ³viles lo rechazan
+ -- justo al abandonar el login.
+ local parent=baseTerminal
  if not renderSurface or renderParent~=parent or renderWidth~=W or renderHeight~=H then
   renderParent=parent;renderWidth=W;renderHeight=H
   renderSurface=window.create(parent,1,1,W,H,false)
@@ -611,7 +614,7 @@ local function redraw()
   for y=horizon,H-2 do box(1,y,W,y%2==0 and C.lime or C.green) end
   for x=4,W,9 do box(x,horizon-1,2,2,C.green) end
  else
-  -- Fondo XP clásico.
+  -- Fondo XP clÃ¡sico.
   box(1,1,W,H,wallpaper)
   put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
   put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
@@ -647,14 +650,16 @@ local function redraw()
  term.redirect(previousTerm)
  -- Force the completed frame onto monitors. Some monitor implementations do
  -- not repaint reliably when an invisible window is made visible again.
- for row=1,H do
-  local line,fg,bg=renderSurface.getLine(row)
-  if line and fg and bg then
-   pcall(parent.setCursorPos,1,row)
-   if type(parent.blit)=="function" then pcall(parent.blit,line,fg,bg)
-   else
-    pcall(parent.setTextColor,C.white);pcall(parent.setBackgroundColor,wallpaper)
-    pcall(parent.write,line)
+ for _,target in ipairs(outputTargets) do
+  for row=1,H do
+   local line,fg,bg=renderSurface.getLine(row)
+   if line and fg and bg then
+    pcall(target.setCursorPos,1,row)
+    if type(target.blit)=="function" then pcall(target.blit,line,fg,bg)
+    else
+     pcall(target.setTextColor,C.white);pcall(target.setBackgroundColor,wallpaper)
+     pcall(target.write,line)
+    end
    end
   end
  end
@@ -983,7 +988,7 @@ end
 return M
 ]=]
 payload["/drivers/peripherals.lua"] = [=[
--- XP Ultimate CC: deteccion segura de perifÃ©ricos (nombres legacy y actuales).
+-- XP Ultimate CC: deteccion segura de perifÃƒÂ©ricos (nombres legacy y actuales).
 local M = {}
 local aliases = {
   player = {"player_detector", "playerDetector"},
@@ -1099,7 +1104,7 @@ end
 
 function M.setSpeed(name, side, speed)
   local p = peripheral.wrap(name)
-  if not p then return false, "PerifÃ©rico desconectado" end
+  if not p then return false, "PerifÃƒÂ©rico desconectado" end
   speed = math.max(-256, math.min(256, math.floor(tonumber(speed) or 0)))
   if type(p.setTargetSpeed) == "function" then
     local ok, err = pcall(p.setTargetSpeed, side, speed)
@@ -2059,3 +2064,4 @@ print("")
 print("Windows XP Ultimate CC instalado.")
 print("Autostart: abre /startup.lua para elegir; la preferencia actual se conserva.")
 print("Reinicia o ejecuta startup para continuar.")
+
