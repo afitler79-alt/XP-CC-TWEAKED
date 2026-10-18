@@ -90,6 +90,7 @@ local apps={
  {id="system",name="Informacion del sistema",icon="[PC+]"},
 }
 local windows,active={},nil
+local renderSurface,renderParent,renderWidth,renderHeight=nil,nil,0,0
 local menu,logged=false,false
 local menuSearch=""
 local username="Usuario"
@@ -371,7 +372,15 @@ local function drawWindow(w)
  end
 end
 local function redraw()
- W,H=term.getSize();createDevices=ap.create();createAlert=false
+ W,H=term.getSize()
+ local parent=term.current()
+ if not renderSurface or renderParent~=parent or renderWidth~=W or renderHeight~=H then
+  renderParent=parent;renderWidth=W;renderHeight=H
+  renderSurface=window.create(parent,1,1,W,H,false)
+ end
+ renderSurface.setVisible(false)
+ local previousTerm=term.redirect(renderSurface)
+ createAlert=false
  local maxH=math.max(4,H-3)
  for _,w in ipairs(windows) do
   if w.max then w.x=1;w.y=1;w.w=W;w.h=maxH
@@ -413,6 +422,8 @@ local function redraw()
   put(2,H-2,"0. Apagar equipo",C.white,C.green)
  end
  if inputMode then box(2,H-3,W-4,2,C.black);put(3,H-3,inputMode..": "..inputText,C.white,C.black) end
+ term.redirect(previousTerm)
+ renderSurface.setVisible(true)
 end
 local function startInput(mode,initial,suppressChar) inputMode=mode;inputText=initial or "";suppressNextChar=suppressChar==true end
 local function submitInput()
@@ -634,8 +645,10 @@ local function char(c)
 end
 boot()
 while not logged do if login() then logged=true end end
+createDevices=ap.create()
 redraw()
 local clockTimer=os.startTimer(1)
+local peripheralTimer=os.startTimer(5)
 while true do
  if not logged then login();logged=true;redraw() end
  local ev={os.pullEvent()}
@@ -648,6 +661,8 @@ while true do
  elseif ev[1]=="timer" and ev[2]==clockTimer then
   for _,w in ipairs(windows) do if w.id=="games" then games.update(w.data.game) end end
   redraw();clockTimer=os.startTimer(1)
+ elseif ev[1]=="timer" and ev[2]==peripheralTimer then
+  createDevices=ap.create();redraw();peripheralTimer=os.startTimer(5)
  end
 end
 ]=]
