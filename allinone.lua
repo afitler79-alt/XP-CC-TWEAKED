@@ -27,6 +27,7 @@ local function startXP()
   term.clear()
   while true do
     local ok, result = pcall(shell.run, "/sys/kernel.lua")
+    pcall(term.redirect, term.native())
     if ok and result ~= false then return end
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
@@ -593,7 +594,7 @@ local function drawWindow(w)
   elseif row then put(x+2,i,row,C.black,body) end
  end
 end
-local function redraw()
+local function drawFrame()
  W,H=term.getSize()
  -- window.create necesita un terminal nativo. El espejo sirve para
  -- duplicar salida, pero algunos monitores/terminales móviles lo rechazan
@@ -624,7 +625,7 @@ local function redraw()
   local cloud2=math.max(4,math.floor(W*.78));local cloud2Y=math.max(5,cloudY+4)
   box(cloud2,cloud2Y,8,2,C.white);box(cloud2+2,cloud2Y-1,4,1,C.white);box(cloud2+1,cloud2Y+2,10,1,C.gray)
   local horizon=math.max(5,math.floor(H*.62))
-  for y=horizon,H-2 do box(1,y,W,y%2==0 and C.lime or C.green) end
+  for y=horizon,H-2 do box(1,y,W,1,y%2==0 and C.lime or C.green) end
   for x=4,W,9 do box(x,horizon-1,2,2,C.green) end
  else
   -- Fondo XP clásico.
@@ -675,6 +676,14 @@ local function redraw()
     end
    end
   end
+ end
+end
+local function redraw()
+ local before=term.current()
+ local ok,err=pcall(drawFrame)
+ if not ok then
+  pcall(term.redirect,before)
+  status="Error de dibujo: "..tostring(err):sub(1,60)
  end
 end
 local function startInput(mode,initial,suppressChar) inputMode=mode;inputText=initial or "";suppressNextChar=suppressChar==true end
