@@ -78,6 +78,9 @@ local apps={
  {id="explorer",name="Mis documentos",icon="[DIR]"},{id="notepad",name="Bloc de notas",icon="[TXT]"},
  {id="cmd",name="Simbolo del sistema",icon=">_"},{id="media",name="Windows Media Player",icon="[M]"},
  {id="control",name="Panel de control",icon="[CFG]"},
+ {id="settings",name="Ajustes XP",icon="[OPT]"},{id="taskmgr",name="Administrador de tareas",icon="[TASK]"},
+ {id="clock",name="Cronometro",icon="[TIME]"},
+ {id="games",name="Juegos XP",icon="[GAME]"},
  {id="users",name="Cuentas de usuario",icon="[USR]"},
  {id="calculator",name="Calculadora",icon="[+ -]"},
  {id="paint",name="Paint XP",icon="[ART]"},
@@ -85,6 +88,7 @@ local apps={
 }
 local windows,active={},nil
 local menu,logged=false,false
+local menuSearch=""
 local username="Usuario"
 local inputMode,inputText=nil,""
 local status="Bienvenido a Windows XP Ultimate CC"
@@ -107,10 +111,28 @@ local files=dofile("/apps/files.lua")
 local audio=dofile("/apps/audio.lua")
 local calculator=dofile("/apps/calculator.lua")
 local studio=dofile("/apps/studio.lua")
+local games=dofile("/apps/games.lua")
 local soundOK,sounds=pcall(dofile,"/sys/sounds.lua")
 if not soundOK then sounds={play=function() return false end} end
-local function playSound(name) pcall(sounds.play,name) end
+local soundEnabled=true
+local function playSound(name) if soundEnabled then pcall(sounds.play,name) end end
 local wallpaper=C.lightBlue
+local themes={{name="Luna azul",wall=C.lightBlue,accent=C.blue},{name="Aqua",wall=C.cyan,accent=C.blue},{name="Violeta",wall=C.purple,accent=C.blue},{name="Cielo",wall=C.lightBlue,accent=C.cyan},{name="Bosque",wall=C.lime,accent=C.green},{name="Atardecer",wall=C.orange,accent=C.red}}
+local themeIndex=1
+local settingsPath="/.xpultimate/settings"
+local function saveSettings()
+ if not fs.exists("/.xpultimate") then fs.makeDir("/.xpultimate") end
+ local f=fs.open(settingsPath,"w");if f then f.write(textutils.serialize({theme=themeIndex,sounds=soundEnabled}));f.close() end
+end
+if fs.exists(settingsPath) then
+ local f=fs.open(settingsPath,"r")
+ if f then local ok,saved=pcall(textutils.unserialize,f.readAll());f.close()
+  if ok and type(saved)=="table" then
+   themeIndex=math.max(1,math.min(#themes,tonumber(saved.theme) or 1));wallpaper=themes[themeIndex].wall
+   if type(saved.sounds)=="boolean" then soundEnabled=saved.sounds end
+  end
+ end
+end
 local paintColors={C.black,C.red,C.green,C.blue,C.orange,C.purple}
 local desktopRows=4
 local userFile="/.xpultimate/users"
@@ -138,6 +160,11 @@ local function put(x,y,s,fg,bg)
  term.write(clipped(s,math.max(0,W-math.max(1,x)+1)))
 end
 local function center(y,s,fg,bg) put(math.floor((W-#s)/2)+1,y,s,fg,bg) end
+local function matchingApps()
+ local matches={};local needle=(menuSearch or ""):lower()
+ for _,app in ipairs(apps) do if needle=="" or app.name:lower():find(needle,1,true) then matches[#matches+1]=app end end
+ return matches
+end
 local function loadUsers()
  local out={}
  if fs.exists(userFile) then local f=fs.open(userFile,"r"); local ok,t=pcall(textutils.unserialize,f.readAll());f.close();if ok and type(t)=="table" then out=t end end
@@ -211,6 +238,10 @@ local function open(id)
  elseif id=="users" then w.data.lines={"Cuentas locales","[A] Anadir una cuenta sin PIN",""}
  elseif id=="calculator" then w.data.expression="";w.data.result="Listo"
  elseif id=="studio" then w.data.project=studio.new()
+ elseif id=="settings" then w.data.theme=themeIndex
+ elseif id=="taskmgr" then w.data.selected=1
+ elseif id=="clock" then w.data.elapsed=0;w.data.running=false;w.data.started=0
+ elseif id=="games" then w.data.game=games.new()
  elseif id=="paint" then w.data.pixels={};w.data.brush=paintColors[2]
  elseif id=="system" then w.data.lines={"Informacion del sistema"}
  end
@@ -239,6 +270,20 @@ local function appLines(w)
   for _,d in ipairs(devices) do lines[#lines+1]=d.name.." ("..d.kind..")";for side,rpm in pairs(d.speed) do lines[#lines+1]="  "..side..": "..rpm.." RPM" end;for side,value in pairs(d.stress) do local cap=d.capacity[side];lines[#lines+1]="  "..side..": stress "..value..(cap and ("/"..cap) or "");if cap and cap>0 and value>=cap then createAlert=true end end end
   if #devices==0 then lines[#lines+1]="No se encontraron lectores de Create compatibles." end
  elseif w.id=="control" then lines={"Panel de control","[U] Administrar usuarios","[L] Cerrar sesion","[A] Autostart: "..(getAutoStart() and "ACTIVADO" or "DESACTIVADO"),"HTTP API: "..tostring(http and http.get~=nil)}
+ elseif w.id=="settings" then
+  lines={"Ajustes de Windows XP Ultimate","Flechas: elegir tema | ENTER: aplicar","S: sonidos de interfaz - "..(soundEnabled and "ACTIVADOS" or "DESACTIVADOS"),"Temas disponibles:"}
+  for i,t in ipairs(themes) do lines[#lines+1]=(i==w.data.theme and "> " or "  ")..i..". "..t.name end
+ elseif w.id=="taskmgr" then
+  lines={"Administrador de tareas","Flechas: seleccionar | ENTER: activar","X: cerrar ventana seleccionada",""};w.data.targets={}
+  for _,target in ipairs(windows) do if target~=w and not target.min then w.data.targets[#w.data.targets+1]=target end end
+  if #w.data.targets==0 then lines[#lines+1]="No hay otras ventanas abiertas." else
+   w.data.selected=math.max(1,math.min(#w.data.targets,w.data.selected or 1))
+   for i,target in ipairs(w.data.targets) do lines[#lines+1]=(i==w.data.selected and "> " or "  ")..target.name..(target==active and " (activa)" or "") end
+  end
+ elseif w.id=="clock" then
+  local elapsed=w.data.elapsed or 0;if w.data.running then elapsed=elapsed+math.max(0,os.clock()-w.data.started) end
+  lines={"Cronometro XP","",string.format("%02d:%02d.%02d",math.floor(elapsed/60),math.floor(elapsed)%60,math.floor(elapsed*100)%100),"","SPACE: iniciar/pausar","R: reiniciar"}
+ elseif w.id=="games" then lines=games.lines(d.game)
  elseif w.id=="users" then lines={"Cuentas locales", "Usuario actual: "..username, "[A] Agregar cuenta local", "", "Cuentas:"};for _,u in ipairs(users) do lines[#lines+1]="- "..u.name end
  elseif w.id=="calculator" then lines={"Calculadora XP","Expresion: "..(d.expression or ""),"Resultado: "..(d.result or "Listo"),"","ENTER: calcular | + - * / % | parentesis"}
  elseif w.id=="studio" then lines=studio.lines(d.project,d.project.selected,d.project.page)
@@ -312,7 +357,12 @@ local function redraw()
  if createAlert then put(math.max(10,W-29),H-1,"CREATE STALLED",C.white,C.red) end
  put(math.max(1,W-9),H-1," "..os.date("%H:%M").." ",C.white,C.blue)
  box(1,H-2,W,1,C.lightGray);put(2,H-2,"XP Ultimate | "..status,C.black,C.lightGray)
- if menu then box(1,H-9,23,8,C.lightGray);box(1,H-9,23,1,C.blue);put(2,H-9,"Windows XP Ultimate",C.white,C.blue);for i,a in ipairs(apps) do if i<7 then put(2,H-9+i,""..i..". "..a.name,C.black,C.lightGray) end end;put(2,H-2,"0. Apagar equipo",C.black,C.lightGray) end
+ if menu then
+  local found=matchingApps();box(1,H-9,27,8,C.lightGray);box(1,H-9,27,1,C.blue)
+  put(2,H-9,"Inicio: "..(menuSearch~="" and menuSearch or username),C.white,C.blue)
+  for i=1,math.min(6,#found) do put(2,H-9+i,i..". "..found[i].name,C.black,C.lightGray) end
+  put(2,H-2,"0. Apagar equipo",C.white,C.green)
+ end
  if inputMode then box(2,H-3,W-4,2,C.black);put(3,H-3,inputMode..": "..inputText,C.white,C.black) end
 end
 local function startInput(mode,initial) inputMode=mode;inputText=initial or "" end
@@ -367,10 +417,10 @@ local function click(x,y)
  playSound("click")
  if menu then
   if y==H-2 then menu=false;playSound("shutdown");os.shutdown();return end
-  local n=y-(H-9);if n>=1 and n<=#apps and apps[n] then launch(apps[n].id);return end
+  local n=y-(H-9);local found=matchingApps();if n>=1 and n<=math.min(6,#found) and found[n] then launch(found[n].id);return end
   menu=false
  end
- if y==H-1 and x<=11 then menu=not menu;return end
+ if y==H-1 and x<=11 then menu=not menu;menuSearch="";return end
  if y==H-1 then local i=math.floor((x-12)/13)+1;if x>=12 and windows[i] then active=windows[i];active.min=false end;return end
  for i=#windows,1,-1 do local w=windows[i];if not w.min and x>=w.x and x<w.x+w.w and y>=w.y and y<w.y+w.h then
   active=w
@@ -380,6 +430,13 @@ local function click(x,y)
     elseif x>=w.x+w.w-11 and x<=w.x+w.w-10 then w.min=true
     else w.drag={x-w.x,y-w.y} end;return end
   local row=y-w.y-2+w.scroll
+  if w.id=="settings" then
+   local choice=y-(w.y+5)+w.scroll
+   if choice>=1 and choice<=#themes then w.data.theme=choice;themeIndex=choice;wallpaper=themes[choice].wall;status="Tema aplicado: "..themes[choice].name;return end
+  elseif w.id=="taskmgr" then
+   local choice=y-(w.y+5)+w.scroll
+   if w.data.targets and w.data.targets[choice] then w.data.selected=choice;return end
+  end
   if w.id=="studio" then
    local track=y-(w.y+7)+w.scroll;local step=x-(w.x+9)+1
    if track>=1 and track<=#w.data.project.tracks then
@@ -388,6 +445,7 @@ local function click(x,y)
     return
    end
   end
+  if w.id=="games" then games.click(w.data.game,x-(w.x+4),y-(w.y+4));return end
   if w.id=="paint" and y>=w.y+5 and y<=w.y+w.h-2 and x>=w.x+2 and x<=w.x+w.w-3 then
    local rr=y-(w.y+5)+1;local cc=x-(w.x+2)+1;w.data.pixels[rr]=w.data.pixels[rr] or {};w.data.pixels[rr][cc]={color=w.data.brush,char=w.data.brushChar or "*"}
   end
@@ -405,9 +463,18 @@ end
 local function key(k)
  playSound("click")
  if inputMode then if k==keys.enter then submitInput() elseif k==keys.backspace then inputText=inputText:sub(1,-2) elseif k==keys.escape then inputMode=nil;inputText="" end;return end
+ if menu then
+  if k==keys.escape then menu=false
+  elseif k==keys.backspace then menuSearch=menuSearch:sub(1,-2)
+  elseif k==keys.enter then local found=matchingApps();if found[1] then launch(found[1].id) end
+  elseif k==keys.zero then playSound("shutdown");os.shutdown()
+  elseif k>=keys.one and k<=keys.six then local found=matchingApps();local app=found[k-keys.one+1];if app then launch(app.id) end end
+  return
+ end
  if k==keys.escape then menu=false;return end
  if not active then return end
  local w=active
+ if w.id=="games" then games.key(w.data.game,k);return end
  if k==keys.enter then
   if w.id=="browser" then startInput("URL",w.data.url)
   elseif w.id=="cmd" then startInput("CMD","")
@@ -418,6 +485,18 @@ local function key(k)
  elseif k==keys.a and w.id=="browser" then startInput("URL o busqueda",w.data.url)
  elseif k==keys.p and w.id=="media" then local ok,err=audio.playNote(12);status=ok and "Nota reproducida" or err
  elseif k==keys.d and w.id=="media" then startInput("Ruta DFPWM","")
+ elseif k==keys.space and w.id=="clock" then
+  if w.data.running then w.data.elapsed=w.data.elapsed+math.max(0,os.clock()-w.data.started);w.data.running=false
+  else w.data.started=os.clock();w.data.running=true end
+ elseif k==keys.r and w.id=="clock" then w.data.elapsed=0;w.data.started=os.clock()
+ elseif k==keys.s and w.id=="settings" then soundEnabled=not soundEnabled;saveSettings();status="Sonidos "..(soundEnabled and "activados" or "desactivados")
+ elseif k==keys.up and w.id=="settings" then w.data.theme=math.max(1,w.data.theme-1)
+ elseif k==keys.down and w.id=="settings" then w.data.theme=math.min(#themes,w.data.theme+1)
+ elseif k==keys.enter and w.id=="settings" then themeIndex=w.data.theme;wallpaper=themes[themeIndex].wall;saveSettings();status="Tema aplicado: "..themes[themeIndex].name
+ elseif k==keys.up and w.id=="taskmgr" then w.data.selected=math.max(1,(w.data.selected or 1)-1)
+ elseif k==keys.down and w.id=="taskmgr" then w.data.selected=(w.data.selected or 1)+1
+ elseif k==keys.enter and w.id=="taskmgr" then local target=w.data.targets and w.data.targets[w.data.selected or 1];if target then active=target;target.min=false;status="Ventana activada: "..target.name end
+ elseif k==keys.x and w.id=="taskmgr" then local target=w.data.targets and w.data.targets[w.data.selected or 1];if target then for i,v in ipairs(windows) do if v==target then table.remove(windows,i);break end end;active=w;status="Ventana cerrada" end
  elseif k==keys.p and w.id=="studio" then local ok,err=studio.play(w.data.project);status=ok and "Reproduccion terminada" or err
  elseif k==keys.s and w.id=="studio" then startInput("Guardar proyecto en ruta","/xp_song.xpm");inputMode="studio-save"
  elseif k==keys.e and w.id=="studio" then startInput("Exportar reproductor Lua","/xp_song.lua");inputMode="studio-export"
@@ -440,7 +519,7 @@ local function key(k)
  elseif k==keys.u and w.id=="control" then open("users")
  elseif k==keys.l and w.id=="control" then playSound("logoff");windows={};active=nil;logged=false
  elseif k==keys.a and w.id=="control" then setAutoStart(not getAutoStart())
- elseif k==keys.t and w.id=="control" then wallpaper=wallpaper==C.lightBlue and C.cyan or (wallpaper==C.cyan and C.purple or C.lightBlue)
+ elseif k==keys.t and w.id=="control" then themeIndex=themeIndex%#themes+1;wallpaper=themes[themeIndex].wall;saveSettings();status="Tema aplicado: "..themes[themeIndex].name
  elseif k==keys.a and w.id=="users" then startInput("Nombre de cuenta","Nuevo usuario")
  elseif k==keys.m and w.id=="players" then startInput("Mensaje para Chat Box","")
  elseif k==keys.r and w.id=="system" then w.data.refresh=os.clock()
@@ -451,6 +530,7 @@ local function key(k)
 end
 local function char(c)
  if inputMode then inputText=inputText..c
+ elseif menu then menuSearch=menuSearch..c
  elseif active and active.id=="studio" then
   if c=="+" or c=="=" then studio.tempo(active.data.project,5)
   elseif c=="-" then studio.tempo(active.data.project,-5) end
@@ -469,7 +549,10 @@ while true do
  elseif ev[1]=="mouse_up" then if active then active.drag=nil end
  elseif ev[1]=="key" then key(ev[2]);redraw()
  elseif ev[1]=="char" then char(ev[2]);redraw()
- elseif ev[1]=="timer" and ev[2]==clockTimer then redraw();clockTimer=os.startTimer(1) end
+ elseif ev[1]=="timer" and ev[2]==clockTimer then
+  for _,w in ipairs(windows) do if w.id=="games" then games.update(w.data.game) end end
+  redraw();clockTimer=os.startTimer(1)
+ end
 end
 ]=]
 payload["/sys/sounds.lua"] = [=[
@@ -872,6 +955,103 @@ function M.preset(song,index)
     for _,step in ipairs(beat) do track.pattern[step]=true end
   end
   song.preset=index
+end
+return M
+]=]
+payload["/apps/games.lua"] = [=[
+-- Mini-juegos para el escritorio XP, dibujados con caracteres de terminal.
+local M={}
+local function empty4() local b={};for y=1,4 do b[y]={0,0,0,0} end;return b end
+local function spawn(b)
+ local free={};for y=1,4 do for x=1,4 do if b[y][x]==0 then free[#free+1]={x,y} end end end
+ if #free>0 then local p=free[math.random(#free)];b[p[2]][p[1]]=math.random(10)==1 and 4 or 2 end
+end
+local function new2048()
+ local b=empty4();spawn(b);spawn(b);return {mode="2048",board=b,score=0,over=false,won=false}
+end
+local function newTic()
+ local b={{" "," "," "},{" "," "," "},{" "," "," "}}
+ return {mode="tic",board=b,turn="X",winner=nil}
+end
+local function newReaction() return {mode="reaction",ready=false,start=0,result=nil} end
+function M.new() return {mode="menu",game=nil} end
+function M.choose(state,choice)
+ if choice==1 then state.game=new2048();state.mode="2048"
+ elseif choice==2 then state.game=newTic();state.mode="tic"
+ elseif choice==3 then state.game=newReaction();state.mode="reaction" end
+end
+local function ticWinner(b)
+ local lines={{b[1][1],b[1][2],b[1][3]},{b[2][1],b[2][2],b[2][3]},{b[3][1],b[3][2],b[3][3]},
+  {b[1][1],b[2][1],b[3][1]},{b[1][2],b[2][2],b[3][2]},{b[1][3],b[2][3],b[3][3]},
+  {b[1][1],b[2][2],b[3][3]},{b[1][3],b[2][2],b[3][1]}}
+ for _,l in ipairs(lines) do if l[1]~=" " and l[1]==l[2] and l[2]==l[3] then return l[1] end end
+ for y=1,3 do for x=1,3 do if b[y][x]==" " then return nil end end end
+ return "Empate"
+end
+function M.click(state,x,y)
+ local g=state.game;if not g then return end
+ if g.mode=="tic" and not g.winner then
+  local col=math.floor((x-1)/4)+1;local row=math.floor((y-1)/2)+1
+  if row>=1 and row<=3 and col>=1 and col<=3 and g.board[row][col]==" " then
+   g.board[row][col]=g.turn;g.winner=ticWinner(g.board);g.turn=g.turn=="X" and "O" or "X"
+  end
+ elseif g.mode=="reaction" then
+  if not g.ready then g.result="Espera a que se ilumine el aviso." else g.result=string.format("Tiempo: %.3f s",os.clock()-g.start);g.ready=false end
+ end
+end
+local function lineCells(b,dir,line)
+ local cells={}
+ for i=1,4 do
+  if dir=="left" then cells[i]={line,i} elseif dir=="right" then cells[i]={line,5-i}
+  elseif dir=="up" then cells[i]={i,line} else cells[i]={5-i,line} end
+ end
+ return cells
+end
+local function slide(g,dir)
+ local b=g.board;local changed=false
+ for line=1,4 do
+  local coords=lineCells(b,dir,line);local vals={}
+  for _,p in ipairs(coords) do local v=b[p[1]][p[2]];if v~=0 then vals[#vals+1]=v end end
+  local merged={};local out={};local i=1
+  while i<=#vals do
+   if vals[i]==vals[i+1] then out[#out+1]=vals[i]*2;g.score=g.score+vals[i]*2;i=i+2 else out[#out+1]=vals[i];i=i+1 end
+  end
+  for k,p in ipairs(coords) do local value=out[k] or 0;if b[p[1]][p[2]]~=value then changed=true end;b[p[1]][p[2]]=value end
+ end
+ if changed then spawn(b) end
+ local moves=false;local hasWin=false
+ for y=1,4 do for x=1,4 do local v=b[y][x];if v==2048 then hasWin=true end;if v==0 then moves=true end
+  if x<4 and v==b[y][x+1] then moves=true end;if y<4 and v==b[y+1][x] then moves=true end
+ end end
+ g.won=g.won or hasWin;g.over=not moves
+end
+function M.key(state,key)
+ if state.mode=="menu" then
+  if key==keys.one then M.choose(state,1) elseif key==keys.two then M.choose(state,2) elseif key==keys.three then M.choose(state,3) end;return
+ end
+ local g=state.game;if not g then return end
+ if key==keys.escape then state.mode="menu";state.game=nil;return end
+ if g.mode=="2048" and key==keys.r then state.game=new2048();return end
+ if g.mode=="2048" and not g.over then
+  if key==keys.left then slide(g,"left") elseif key==keys.right then slide(g,"right") elseif key==keys.up then slide(g,"up") elseif key==keys.down then slide(g,"down") end
+ elseif g.mode=="reaction" and key==keys.r then g.ready=false;g.start=os.clock()+math.random(1,4);g.result="Preparado... espera la senal" end
+end
+function M.update(state)
+ local g=state.game
+ if g and g.mode=="reaction" and not g.ready and g.start>0 and os.clock()>=g.start then g.ready=true;g.start=os.clock();g.result="AHORA: haz clic" end
+end
+function M.lines(state)
+ local g=state.game
+ if state.mode=="menu" then return {"Juegos XP","","1. 2048 - fusiona numeros","2. Tres en raya - dos jugadores","3. Reflejos - pulsa cuando cambie","","Pulsa 1, 2 o 3 para jugar."} end
+ if g.mode=="2048" then
+  local lines={"2048  |  Puntos: "..g.score..(g.won and "  GANASTE" or "")..(g.over and "  FIN" or ""),"Flechas para mover | R reinicia | ESC menu",""}
+  for y=1,4 do local cells="";for x=1,4 do local n=g.board[y][x];cells=cells..string.format("|%4s",n==0 and " " or tostring(n)) end;lines[#lines+1]=cells.."|" end
+  lines[#lines+1]="";lines[#lines+1]="Combina fichas iguales para llegar a 2048.";return lines
+ elseif g.mode=="tic" then
+  local lines={"Tres en raya | Turno: "..(g.winner or g.turn),"Haz clic en una casilla | ESC menu",""}
+  for y=1,3 do lines[#lines+1]="   "..table.concat(g.board[y]," | ").."   ";if y<3 then lines[#lines+1]="  ---+---+---" end end
+  if g.winner then lines[#lines+1]="Resultado: "..g.winner end;return lines
+ else return {"Prueba de reflejos","","R: preparar una ronda","Haz clic solo cuando aparezca AHORA.","",g.result or "Pulsa R para empezar", "ESC: volver a juegos"} end
 end
 return M
 ]=]
