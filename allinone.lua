@@ -81,6 +81,7 @@ local apps={
  {id="settings",name="Ajustes XP",icon="[OPT]"},{id="taskmgr",name="Administrador de tareas",icon="[TASK]"},
  {id="clock",name="Cronometro",icon="[TIME]"},
  {id="games",name="Juegos XP",icon="[GAME]"},
+ {id="tools",name="Centro de herramientas",icon="[TOOLS]"},
  {id="users",name="Cuentas de usuario",icon="[USR]"},
  {id="calculator",name="Calculadora",icon="[+ -]"},
  {id="paint",name="Paint XP",icon="[ART]"},
@@ -112,6 +113,7 @@ local audio=dofile("/apps/audio.lua")
 local calculator=dofile("/apps/calculator.lua")
 local studio=dofile("/apps/studio.lua")
 local games=dofile("/apps/games.lua")
+local tools=dofile("/apps/tools.lua")
 local soundOK,sounds=pcall(dofile,"/sys/sounds.lua")
 if not soundOK then sounds={play=function() return false end} end
 local soundEnabled=true
@@ -242,6 +244,7 @@ local function open(id)
  elseif id=="taskmgr" then w.data.selected=1
  elseif id=="clock" then w.data.elapsed=0;w.data.running=false;w.data.started=0
  elseif id=="games" then w.data.game=games.new()
+ elseif id=="tools" then w.data.tools=tools.new()
  elseif id=="paint" then w.data.pixels={};w.data.brush=paintColors[2]
  elseif id=="system" then w.data.lines={"Informacion del sistema"}
  end
@@ -284,6 +287,7 @@ local function appLines(w)
   local elapsed=w.data.elapsed or 0;if w.data.running then elapsed=elapsed+math.max(0,os.clock()-w.data.started) end
   lines={"Cronometro XP","",string.format("%02d:%02d.%02d",math.floor(elapsed/60),math.floor(elapsed)%60,math.floor(elapsed*100)%100),"","SPACE: iniciar/pausar","R: reiniciar"}
  elseif w.id=="games" then lines=games.lines(d.game)
+ elseif w.id=="tools" then lines=tools.lines(d.tools)
  elseif w.id=="users" then lines={"Cuentas locales", "Usuario actual: "..username, "[A] Agregar cuenta local", "", "Cuentas:"};for _,u in ipairs(users) do lines[#lines+1]="- "..u.name end
  elseif w.id=="calculator" then lines={"Calculadora XP","Expresion: "..(d.expression or ""),"Resultado: "..(d.result or "Listo"),"","ENTER: calcular | + - * / % | parentesis"}
  elseif w.id=="studio" then lines=studio.lines(d.project,d.project.selected,d.project.page)
@@ -347,9 +351,9 @@ local function redraw()
  for y=horizon,H-2 do box(1,y,W,1,C.green) end
  put(1,horizon,string.rep("~",W),C.lime,C.green)
  local columns=math.max(1,math.floor((W-10)/15)+1)
- desktopRows=math.max(1,math.floor((H-5)/3),math.ceil(#apps/columns))
+ desktopRows=math.max(1,math.floor((H-5)/3))
  for i,a in ipairs(apps) do local col=math.floor((i-1)/desktopRows);local row=(i-1)%desktopRows;local x=2+col*15;local y=2+row*3
-  if x<W-8 then put(x,y,a.icon,C.yellow,wallpaper);put(x,y+1,clipped(a.name,13),C.white,C.blue) end
+  if x<W-8 and y+1<H-3 then put(x,y,a.icon,C.yellow,wallpaper);put(x,y+1,clipped(a.name,13),C.white,C.blue) end
  end
  for _,w in ipairs(windows) do drawWindow(w) end
  box(1,H-1,W,1,C.blue);put(1,H-1," XP Inicio ",C.white,C.green)
@@ -376,6 +380,9 @@ local function submitInput()
   elseif mode=="studio-track" then studio.renameTrack(active.data.project,value);status="Pista renombrada"
   else result=studio.load(value);if result then active.data.project=result;status="Proyecto cargado: "..value else status="No se pudo cargar el proyecto" end end
   return
+ end
+ if active and active.id=="tools" and mode=="tool-task" then
+  local ok,err=tools.addTask(active.data.tools,value);status=ok and "Tarea guardada" or tostring(err);return
  end
  if not active then return end
  local d=active.data
@@ -475,6 +482,11 @@ local function key(k)
  if not active then return end
  local w=active
  if w.id=="games" then games.key(w.data.game,k);return end
+ if w.id=="tools" then
+  local result=tools.key(w.data.tools,k)
+  if result=="addTask" then startInput("Nueva tarea","") elseif result and result~="redraw" then status=result end
+  return
+ end
  if k==keys.enter then
   if w.id=="browser" then startInput("URL",w.data.url)
   elseif w.id=="cmd" then startInput("CMD","")
@@ -974,11 +986,15 @@ local function newTic()
  return {mode="tic",board=b,turn="X",winner=nil}
 end
 local function newReaction() return {mode="reaction",ready=false,start=0,result=nil} end
+local function newGuess() return {mode="guess",target=math.random(1,10),tries=0,history={}} end
+local function newDice() return {mode="dice",round=0,player=0,cpu=0,last="Pulsa ESPACIO para lanzar"} end
 function M.new() return {mode="menu",game=nil} end
 function M.choose(state,choice)
  if choice==1 then state.game=new2048();state.mode="2048"
  elseif choice==2 then state.game=newTic();state.mode="tic"
  elseif choice==3 then state.game=newReaction();state.mode="reaction" end
+ if choice==4 then state.game=newGuess();state.mode="guess"
+ elseif choice==5 then state.game=newDice();state.mode="dice" end
 end
 local function ticWinner(b)
  local lines={{b[1][1],b[1][2],b[1][3]},{b[2][1],b[2][2],b[2][3]},{b[3][1],b[3][2],b[3][3]},
@@ -1027,11 +1043,28 @@ local function slide(g,dir)
 end
 function M.key(state,key)
  if state.mode=="menu" then
-  if key==keys.one then M.choose(state,1) elseif key==keys.two then M.choose(state,2) elseif key==keys.three then M.choose(state,3) end;return
+  if key==keys.one then M.choose(state,1) elseif key==keys.two then M.choose(state,2) elseif key==keys.three then M.choose(state,3) elseif key==keys.four then M.choose(state,4) elseif key==keys.five then M.choose(state,5) end;return
  end
  local g=state.game;if not g then return end
  if key==keys.escape then state.mode="menu";state.game=nil;return end
  if g.mode=="2048" and key==keys.r then state.game=new2048();return end
+ if g.mode=="guess" then
+  if key==keys.r then state.game=newGuess()
+  elseif key>=keys.one and key<=keys.nine then
+   local n=key-keys.one+1;g.tries=g.tries+1
+   local hint=n==g.target and "Correcto!" or (n<g.target and "Mas alto" or "Mas bajo")
+   g.history[#g.history+1]=tostring(n)..": "..hint
+   if #g.history>5 then table.remove(g.history,1) end
+   if n==g.target then g.won=true end
+  elseif key==keys.zero then g.tries=g.tries+1;local n=10;g.history[#g.history+1]="10: "..(n==g.target and "Correcto!" or (n<g.target and "Mas alto" or "Mas bajo"));if n==g.target then g.won=true end end
+  return
+ end
+ if g.mode=="dice" and (key==keys.space or key==keys.enter) and g.round<5 then
+  local player=math.random(1,6);local cpu=math.random(1,6);g.round=g.round+1
+  if player>cpu then g.player=g.player+1 elseif cpu>player then g.cpu=g.cpu+1 end
+  g.last="Ronda "..g.round..": tu "..player.." - CPU "..cpu
+  return
+ end
  if g.mode=="2048" and not g.over then
   if key==keys.left then slide(g,"left") elseif key==keys.right then slide(g,"right") elseif key==keys.up then slide(g,"up") elseif key==keys.down then slide(g,"down") end
  elseif g.mode=="reaction" and key==keys.r then g.ready=false;g.start=os.clock()+math.random(1,4);g.result="Preparado... espera la senal" end
@@ -1042,7 +1075,7 @@ function M.update(state)
 end
 function M.lines(state)
  local g=state.game
- if state.mode=="menu" then return {"Juegos XP","","1. 2048 - fusiona numeros","2. Tres en raya - dos jugadores","3. Reflejos - pulsa cuando cambie","","Pulsa 1, 2 o 3 para jugar."} end
+ if state.mode=="menu" then return {"Juegos XP","","1. 2048 - fusiona numeros","2. Tres en raya - dos jugadores","3. Reflejos - pulsa cuando cambie","4. Adivina el numero (1-10)","5. Dados contra CPU","","Pulsa 1-5 para jugar."} end
  if g.mode=="2048" then
   local lines={"2048  |  Puntos: "..g.score..(g.won and "  GANASTE" or "")..(g.over and "  FIN" or ""),"Flechas para mover | R reinicia | ESC menu",""}
   for y=1,4 do local cells="";for x=1,4 do local n=g.board[y][x];cells=cells..string.format("|%4s",n==0 and " " or tostring(n)) end;lines[#lines+1]=cells.."|" end
@@ -1051,7 +1084,129 @@ function M.lines(state)
   local lines={"Tres en raya | Turno: "..(g.winner or g.turn),"Haz clic en una casilla | ESC menu",""}
   for y=1,3 do lines[#lines+1]="   "..table.concat(g.board[y]," | ").."   ";if y<3 then lines[#lines+1]="  ---+---+---" end end
   if g.winner then lines[#lines+1]="Resultado: "..g.winner end;return lines
- else return {"Prueba de reflejos","","R: preparar una ronda","Haz clic solo cuando aparezca AHORA.","",g.result or "Pulsa R para empezar", "ESC: volver a juegos"} end
+ elseif g.mode=="reaction" then return {"Prueba de reflejos","","R: preparar una ronda","Haz clic solo cuando aparezca AHORA.","",g.result or "Pulsa R para empezar", "ESC: volver a juegos"}
+ elseif g.mode=="guess" then
+  local lines={"Adivina el numero (1-10)","Pulsa 1-9 o 0 para 10; R nueva partida","Intentos: "..g.tries..(g.won and " - GANASTE! Era "..g.target or "") ,""}
+  for _,v in ipairs(g.history) do lines[#lines+1]=v end
+  lines[#lines+1]="Usa R para iniciar otra partida.";return lines
+ else return {"Dados contra CPU","Pulsa ESPACIO o ENTER para lanzar","Ronda: "..g.round.."/5","Puntuacion: Tu "..g.player.." - CPU "..g.cpu,"",g.last,g.round>=5 and (g.player==g.cpu and "Empate!" or (g.player>g.cpu and "Has ganado!" or "Gana la CPU")) or "ESC: volver al selector"} end
+end
+return M
+]=]
+payload["/apps/tools.lua"] = [=[
+-- Centro de herramientas: calendario, tareas, perifericos, redstone y diagnostico.
+local M={}
+local SIDES={"top","bottom","left","right","front","back"}
+local TODO="/.xpultimate/todo"
+local function loadTasks()
+ if not fs.exists(TODO) then return {} end
+ local f=fs.open(TODO,"r");if not f then return {} end
+ local raw=f.readAll();f.close();local ok,data=pcall(textutils.unserialize,raw)
+ return ok and type(data)=="table" and data or {}
+end
+local function saveTasks(state)
+ if not fs.exists("/.xpultimate") then fs.makeDir("/.xpultimate") end
+ local f=fs.open(TODO,"w");if not f then return false end
+ f.write(textutils.serialize(state.tasks));f.close();return true
+end
+function M.new() return {page=1,side=1,selected=1,tasks=loadTasks(),month=0} end
+local function peripherals()
+ local out={}
+ if peripheral and peripheral.getNames then
+  for _,name in ipairs(peripheral.getNames()) do
+   local ok,kind=pcall(peripheral.getType,name)
+   out[#out+1]={name=name,kind=type(kind)=="table" and table.concat(kind,",") or tostring(kind or "desconocido")}
+  end
+ end
+ return out
+end
+local function fileStats(path,stats)
+ stats=stats or {files=0,dirs=0}
+ if stats.files+stats.dirs>500 then return stats end
+ local ok,list=pcall(fs.list,path);if not ok then return stats end
+ for _,name in ipairs(list) do
+  local full=fs.combine(path,name)
+  if fs.isDir(full) then stats.dirs=stats.dirs+1;fileStats(full,stats)
+  else stats.files=stats.files+1 end
+  if stats.files+stats.dirs>500 then break end
+ end
+ return stats
+end
+local function calendar(state)
+ local now=os.date("*t");local month=now.month+state.month;local year=now.year
+ while month<1 do month=month+12;year=year-1 end
+ while month>12 do month=month-12;year=year+1 end
+ local first=os.time({year=year,month=month,day=1,hour=12})
+ local start=(tonumber(os.date("%w",first)) or 0)
+ local days=tonumber(os.date("%d",os.time({year=year,month=month+1,day=0,hour=12}))) or 30
+ local lines={"Calendario XP",os.date("%B %Y",first),"Do Lu Ma Mi Ju Vi Sa"}
+ local cells={};for _=1,start do cells[#cells+1]="  " end
+ for day=1,days do cells[#cells+1]=string.format("%2d",day) end
+ for i=1,#cells,7 do lines[#lines+1]=table.concat(cells," ",i,math.min(i+6,#cells)) end
+ lines[#lines+1]="Hoy: "..os.date("%d/%m/%Y")
+ lines[#lines+1]="Flechas izquierda/derecha: mes anterior/siguiente"
+ return lines
+end
+function M.lines(state)
+ local page=state.page
+ if page==1 then
+  local stats=fileStats("/");local free=fs.getFreeSpace and fs.getFreeSpace("/") or "N/D"
+  return {"Centro de herramientas XP","Selecciona panel con teclas 1-8","", "1. Resumen del equipo","2. Perifericos conectados","3. Control Redstone","4. Tareas","5. Calendario","6. Almacenamiento","7. Red y modem","8. Sonido","", "Hora: "..os.date("%H:%M:%S"),"Memoria Lua: "..math.floor(collectgarbage("count")).." KB","Archivos: "..stats.files.."  Carpetas: "..stats.dirs,"Espacio libre: "..tostring(free)}
+ elseif page==2 then
+  local lines={"Perifericos detectados","Nombre | tipo",""};local list=peripherals()
+  for _,p in ipairs(list) do lines[#lines+1]=p.name.." | "..p.kind end
+  if #list==0 then lines[#lines+1]="No hay perifericos conectados." end
+  lines[#lines+1]="Pulsa R para volver a escanear.";return lines
+ elseif page==3 then
+  local side=SIDES[state.side];local input=false;local output=false
+  if redstone then pcall(function() input=redstone.getInput(side);output=redstone.getOutput(side) end) end
+  local lines={"Panel Redstone","Lado seleccionado: "..side,"Entrada: "..tostring(input),"Salida: "..tostring(output),"","Flechas: elegir lado","ENTER: alternar salida","","Estado de todos los lados:"}
+  for _,s in ipairs(SIDES) do local ok,v=pcall(redstone.getInput,s);local ok2,o=pcall(redstone.getOutput,s);lines[#lines+1]=s.."  IN="..tostring(ok and v).." OUT="..tostring(ok2 and o) end
+  return lines
+ elseif page==4 then
+  local lines={"Lista de tareas","A: anadir | X: borrar seleccionada | ENTER: completar",""}
+  if #state.tasks==0 then lines[#lines+1]="No hay tareas. Pulsa A para crear una." end
+  state.selected=math.max(1,math.min(math.max(1,#state.tasks),state.selected))
+  for i,t in ipairs(state.tasks) do lines[#lines+1]=(i==state.selected and "> " or "  ")..(t.done and "[x] " or "[ ] ")..t.text end
+  lines[#lines+1]="Guardado local: /.xpultimate/todo";return lines
+ elseif page==5 then return calendar(state)
+ elseif page==6 then
+  local stats=fileStats("/");local free=fs.getFreeSpace and fs.getFreeSpace("/") or "N/D"
+  return {"Almacenamiento","Archivos encontrados (max 500): "..stats.files,"Directorios encontrados (max 500): "..stats.dirs,"Espacio libre: "..tostring(free),"Ruta de usuario: "..tostring(shell.dir()),"","Los datos se actualizan al volver a abrir este panel."}
+ elseif page==7 then
+  local modems={};for _,p in ipairs(peripherals()) do if p.kind:find("modem",1,true) then modems[#modems+1]=p.name end end
+  local lines={"Red y comunicaciones","HTTP API: "..tostring(http and http.get~=nil),"Modem: "..(#modems>0 and table.concat(modems,", ") or "no detectado"),"Computer ID: "..tostring(os.getComputerID and os.getComputerID() or "N/D"),"Nombre: "..tostring(os.getComputerLabel and os.getComputerLabel() or "sin etiqueta"),"", "La API HTTP depende de la configuracion del entorno."};return lines
+ else
+  local speakers={};for _,p in ipairs(peripherals()) do if p.kind:find("speaker",1,true) then speakers[#speakers+1]=p.name end end
+  return {"Diagnostico de audio","Speaker: "..(#speakers>0 and table.concat(speakers,", ") or "no conectado"),"Pulsa P para una prueba de sonido.","Efectos de interfaz: se controlan en Ajustes XP."}
+ end
+end
+function M.key(state,key)
+ if key>=keys.one and key<=keys.eight then state.page=key-keys.one+1;return "redraw" end
+ if state.page==2 and key==keys.r then return "redraw"
+ elseif state.page==3 then
+  if key==keys.left or key==keys.up then state.side=(state.side-2)%#SIDES+1
+  elseif key==keys.right or key==keys.down then state.side=state.side%#SIDES+1
+  elseif key==keys.enter and redstone then local side=SIDES[state.side];redstone.setOutput(side,not redstone.getOutput(side));return "redraw" end
+ elseif state.page==4 then
+  if key==keys.up then state.selected=math.max(1,state.selected-1)
+  elseif key==keys.down then state.selected=math.min(math.max(1,#state.tasks),state.selected+1)
+  elseif key==keys.enter and state.tasks[state.selected] then state.tasks[state.selected].done=not state.tasks[state.selected].done;saveTasks(state)
+  elseif key==keys.x and state.tasks[state.selected] then table.remove(state.tasks,state.selected);state.selected=math.max(1,math.min(#state.tasks,state.selected));saveTasks(state)
+  elseif key==keys.a then return "addTask" end
+ elseif state.page==5 then
+  if key==keys.left then state.month=state.month-1 elseif key==keys.right then state.month=state.month+1 end
+ elseif state.page==8 and key==keys.p then
+  local speaker=peripheral.find("speaker");if not speaker then return "No hay speaker conectado" end
+  local ok,err=pcall(speaker.playNote,"chime",0.7,18);return ok and "Prueba de sonido enviada" or tostring(err)
+ end
+ return "redraw"
+end
+function M.addTask(state,text)
+ text=tostring(text or ""):gsub("^%s+",""):gsub("%s+$","")
+ if text=="" then return false,"La tarea no puede estar vacia" end
+ if #state.tasks>=50 then return false,"Maximo 50 tareas" end
+ state.tasks[#state.tasks+1]={text=text:sub(1,80),done=false};state.selected=#state.tasks;saveTasks(state);return true
 end
 return M
 ]=]
