@@ -611,7 +611,7 @@ local function redraw()
   for y=horizon,H-2 do box(1,y,W,y%2==0 and C.lime or C.green) end
   for x=4,W,9 do box(x,horizon-1,2,2,C.green) end
  else
-  -- Fondo XP clÃ¡sico.
+  -- Fondo XP clásico.
   box(1,1,W,H,wallpaper)
   put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
   put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
@@ -983,7 +983,7 @@ end
 return M
 ]=]
 payload["/drivers/peripherals.lua"] = [=[
--- XP Ultimate CC: deteccion segura de perifÃƒÂ©ricos (nombres legacy y actuales).
+-- XP Ultimate CC: deteccion segura de perifÃ©ricos (nombres legacy y actuales).
 local M = {}
 local aliases = {
   player = {"player_detector", "playerDetector"},
@@ -1099,7 +1099,7 @@ end
 
 function M.setSpeed(name, side, speed)
   local p = peripheral.wrap(name)
-  if not p then return false, "PerifÃƒÂ©rico desconectado" end
+  if not p then return false, "PerifÃ©rico desconectado" end
   speed = math.max(-256, math.min(256, math.floor(tonumber(speed) or 0)))
   if type(p.setTargetSpeed) == "function" then
     local ok, err = pcall(p.setTargetSpeed, side, speed)
@@ -2059,4 +2059,3 @@ print("")
 print("Windows XP Ultimate CC instalado.")
 print("Autostart: abre /startup.lua para elegir; la preferencia actual se conserva.")
 print("Reinicia o ejecuta startup para continuar.")
-
