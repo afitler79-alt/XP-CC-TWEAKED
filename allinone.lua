@@ -189,30 +189,24 @@ local redirectedMethods={"write","blit","clear","clearLine","getCursorPos","setC
  "getTextColor","setTextColor","getBackgroundColor","setBackgroundColor","isColor","getCursorBlink","setCursorBlink",
  "getPaletteColor","setPaletteColor"}
 local function redirectWindow(target,fallback)
- local proxy={}
+ -- Patch the actual window table before term.redirect validates it. A proxy
+ -- can still be rejected by CraftOS-PC's native Redirect checks.
+ local native=term.native and term.native()
  local methods={}
  for _,method in ipairs(redirectedMethods) do methods[method]=true end
- -- CraftOS-PC extends Redirect with native methods such as isColor and
- -- graphics operations. term.redirect validates every native method, so
- -- expose the full native API and delegate unsupported buffer calls safely.
- local native=term.native and term.native()
  if type(native)=="table" then
   for method,fn in pairs(native) do
    if type(method)=="string" and type(fn)=="function" then methods[method]=true end
   end
  end
  for method in pairs(methods) do
-  local name=method
-  proxy[name]=function(...)
-   local fn=target[name]
-   if type(fn)=="function" then return fn(...) end
-   fn=fallback and fallback[name]
-   if type(fn)=="function" then return fn(...) end
-   fn=native and native[name]
-   if type(fn)=="function" then return fn(...) end
+  if type(target[method])~="function" then
+   local fn=fallback and fallback[method]
+   if type(fn)~="function" and native then fn=native[method] end
+   if type(fn)=="function" then rawset(target,method,fn) end
   end
  end
- return proxy
+ return target
 end
 local function listExternalMonitors()
  local result={}
