@@ -117,7 +117,7 @@ local apps={
  {id="calculator",name="Calculadora",icon="[+ -]"},
  {id="paint",name="Paint XP",icon="[ART]"},
  {id="system",name="Informacion del sistema",icon="[PC+]"},
-}
+}1
 local windows,active={},nil
 local renderSurface,renderParent,renderWidth,renderHeight=nil,nil,0,0
 local menu,logged=false,false
@@ -154,9 +154,9 @@ local soundOK,sounds=pcall(dofile,"/sys/sounds.lua")
 if not soundOK then sounds={play=function() return false end} end
 local soundEnabled=true
 local function playSound(name) if soundEnabled then pcall(sounds.play,name) end end
-local wallpaper=C.lightBlue
-local accentColor=C.blue
-local themes={{name="Luna azul",wall=C.lightBlue,accent=C.blue},{name="Aqua",wall=C.cyan,accent=C.blue},{name="Violeta",wall=C.purple,accent=C.blue},{name="Cielo",wall=C.lightBlue,accent=C.cyan},{name="Bosque",wall=C.lime,accent=C.green},{name="Atardecer",wall=C.orange,accent=C.red}}
+local wallpaper=C.cyan
+local accentColor=C.gray
+local themes={{name="LevelOS Aqua",wall=C.cyan,accent=C.gray,level=true},{name="Luna azul",wall=C.lightBlue,accent=C.blue},{name="Aqua",wall=C.cyan,accent=C.blue},{name="Violeta",wall=C.purple,accent=C.blue},{name="Cielo",wall=C.lightBlue,accent=C.cyan},{name="Bosque",wall=C.lime,accent=C.green},{name="Atardecer",wall=C.orange,accent=C.red}}
 local themeIndex=1
 local settingsPath="/.xpultimate/settings"
 local monitorSetting="/.xpultimate/monitor"
@@ -375,10 +375,10 @@ local function boot()
    local x=logoX+col*3+(row==0 and col or 0)
    put(x,logoY+row,"  ",C.white,pane[row+1][col+1])
   end end
-  put(logoX+7,logoY+1,"Microsoft",C.white,C.black)
+  put(logoX+7,logoY+1,"LevelOS",C.white,C.black)
   put(logoX+7,logoY+2,"Windows",C.white,C.black)
   put(logoX+15,logoY+2,"XP",C.orange,C.black)
-  put(logoX+7,logoY+3,"Professional",C.white,C.black)
+  put(logoX+7,logoY+3,"Ultimate CC",C.white,C.black)
   -- Barra estrecha azul con un bloque luminoso animado.
   put(barX,barY,"["..string.rep(" ",barW-2).."]",C.lightGray,C.black)
   local inside=barW-2
@@ -389,18 +389,40 @@ local function boot()
 end
 local function login()
  while true do
-  term.setBackgroundColor(C.lightBlue);term.clear();box(1,1,W,3,C.blue)
-  put(2,2,"Windows XP Ultimate",C.white,C.blue);put(math.max(1,W-12),2,"LUNA EDITION",C.yellow,C.blue)
-  center(5,"Bienvenido",C.white,C.lightBlue);center(7,"Selecciona tu cuenta",C.white,C.blue)
+  local levelTheme=themes[themeIndex] and themes[themeIndex].level
+  local loginBg=levelTheme and C.cyan or C.lightBlue
+  local loginBar=levelTheme and C.gray or C.blue
+  term.setBackgroundColor(loginBg);term.clear();box(1,1,W,3,loginBar)
+  put(2,2,levelTheme and "LevelOS XP Ultimate" or "Windows XP Ultimate",C.white,loginBar);put(math.max(1,W-12),2,levelTheme and "AQUA" or "LUNA EDITION",C.yellow,loginBar)
+  center(5,"Bienvenido",C.white,loginBg);center(7,"Selecciona tu cuenta",C.white,loginBar)
   for i,u in ipairs(users) do
-   local y=8+i;local bg=i==1 and C.lightBlue or C.blue
+   local y=8+i;local bg=i==1 and (levelTheme and C.lightBlue or C.lightBlue) or loginBar
    local width=math.min(W-8,28);local x=math.floor((W-width)/2)+1
    box(x,y,width,1,bg);put(x+2,y,(i==1 and "> " or "  ")..tostring(u.name or "Usuario"),C.white,bg);put(x+width-4,y,"["..i.."]",C.yellow,bg)
   end
-  center(H-2,"ENTER inicia | Pulsa el numero de cuenta",C.white,C.blue)
-  local e,k=os.pullEvent("key")
-  if k>=keys.one and k<=keys.nine then local u=users[k-keys.one+1];if u then username=u.name; if u.pin=="" then return true end;term.setCursorPos(2,H-1);term.write("PIN: ");local pin=read();if pin==u.pin then return true end end
-  elseif k==keys.enter then username=tostring(users[1] and users[1].name or "Usuario");return true end
+  center(H-2,"ENTER inicia | Pulsa el numero de cuenta",C.white,loginBar)
+  local event,value=os.pullEventRaw()
+  -- Algunos entornos móviles/embebidos envían los números como `char`
+  -- en vez de generar un evento `key`. Aceptamos ambos para que el número
+  -- no termine en la shell como si fuera el nombre de un programa.
+  local selected=nil
+  if event=="char" then
+   local number=tonumber(value)
+   if number and number>=1 and number<=#users then selected=number end
+  elseif event=="key" then
+   if value>=keys.one and value<=keys.nine then selected=value-keys.one+1
+   elseif value==keys.enter then selected=1 end
+  end
+  if selected then
+   local u=users[selected]
+   if u then
+    username=tostring(u.name or "Usuario")
+    if u.pin=="" then return true end
+    term.setCursorPos(2,H-1);term.write("PIN: ")
+    local pin=read()
+    if pin==u.pin then return true end
+   end
+  end
  end
 end
 local function open(id)
@@ -500,12 +522,15 @@ end
 local function drawWindow(w)
  if w.min then return end
  local x,y,ww,hh=w.x,w.y,w.w,w.h
+ local levelTheme=themes[themeIndex] and themes[themeIndex].level
+ local body=levelTheme and C.lightGray or C.white
+ local title=levelTheme and C.gray or accentColor
  -- Shadows are kept inside the desktop; they must never paint over the status strip.
  if y+hh < H-2 then box(x+1,y+hh,ww,1,C.black) end
  if x+ww<=W and y+1<=H-3 then box(x+ww,y+1,1,math.max(0,math.min(hh,H-3-y)),C.gray) end
- box(x,y,ww,hh,C.gray);box(x+1,y+1,ww-2,hh-2,C.white);box(x+1,y,ww-2,1,accentColor)
- put(x+2,y," "..clipped(w.name,math.max(1,ww-18)),C.white,accentColor)
- put(x+ww-13,y,"[_]",C.white,C.lightBlue);put(x+ww-9,y,"[+]",C.white,C.lightBlue);put(x+ww-5,y,"[X]",C.white,C.red)
+ box(x,y,ww,hh,C.gray);box(x+1,y+1,ww-2,hh-2,body);box(x+1,y,ww-2,1,title)
+ put(x+2,y," "..clipped(w.name,math.max(1,ww-18)),C.white,title)
+ put(x+ww-13,y," - ",C.white,title);put(x+ww-9,y," + ",C.white,title);put(x+ww-5,y," X ",C.white,C.red)
  if not w.max and ww>=3 and hh>=3 then put(x+ww-2,y+hh-1,"#",C.white,C.gray) end
  local y0=y+2;local bottom=math.min(H-3,y+hh-2)
  local lines=appLines(w);local max=math.max(0,#lines-(bottom-y0+1));w.scroll=math.max(0,math.min(w.scroll,max))
@@ -556,7 +581,7 @@ local function drawWindow(w)
     pcall(term.setCursorPos,x+2,i)
     if type(term.blit)=="function" then pcall(term.blit,pixelRow[1],pixelRow[2],pixelRow[3]) end
    end
-  elseif row then put(x+2,i,row,C.black,C.white) end
+  elseif row then put(x+2,i,row,C.black,body) end
  end
 end
 local function redraw()
@@ -579,14 +604,26 @@ local function redraw()
  end
  for _,d in ipairs(createDevices) do for side,value in pairs(d.stress) do local cap=d.capacity[side];if cap and cap>0 and value>=cap then createAlert=true end end end
  term.setBackgroundColor(wallpaper);term.clear()
- -- Cielo Luna con sol, nubes y pradera.
- box(1,1,W,H,wallpaper)
- put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
- put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
- put(math.max(1,W-22),4,"(____)(____)",C.white,C.lightBlue)
- local horizon=math.max(3,math.floor(H*.62))
- for y=horizon,H-2 do box(1,y,W,1,C.green) end
- put(1,horizon,string.rep("~",W),C.lime,C.green)
+ if themes[themeIndex] and themes[themeIndex].level then
+  -- Fondo pixelado inspirado en LevelOS V2.4.
+  box(1,1,W,H,C.cyan)
+  local cloudX=math.max(2,math.floor(W*.42));local cloudY=math.max(3,math.floor(H*.16))
+  box(cloudX,cloudY,12,2,C.white);box(cloudX+3,cloudY-1,8,1,C.white);box(cloudX+2,cloudY+2,15,1,C.gray)
+  local cloud2=math.max(4,math.floor(W*.78));local cloud2Y=math.max(5,cloudY+4)
+  box(cloud2,cloud2Y,8,2,C.white);box(cloud2+2,cloud2Y-1,4,1,C.white);box(cloud2+1,cloud2Y+2,10,1,C.gray)
+  local horizon=math.max(5,math.floor(H*.62))
+  for y=horizon,H-2 do box(1,y,W,y%2==0 and C.lime or C.green) end
+  for x=4,W,9 do box(x,horizon-1,2,2,C.green) end
+ else
+  -- Fondo XP clásico.
+  box(1,1,W,H,wallpaper)
+  put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
+  put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
+  put(math.max(1,W-22),4,"(____)(____)",C.white,C.lightBlue)
+  local horizon=math.max(3,math.floor(H*.62))
+  for y=horizon,H-2 do box(1,y,W,1,C.green) end
+  put(1,horizon,string.rep("~",W),C.lime,C.green)
+ end
  desktopColumns=math.max(1,math.floor((W-10)/15)+1)
  desktopRows=math.max(1,math.floor((H-5)/3))
  local perPage=desktopColumns*desktopRows;local pageCount=math.max(1,math.ceil(#apps/perPage));desktopPage=math.max(0,math.min(pageCount-1,desktopPage))
@@ -597,11 +634,12 @@ local function redraw()
   end
  end
  for _,w in ipairs(windows) do drawWindow(w) end
- box(1,H-1,W,1,accentColor);put(1,H-1," XP Inicio ",C.white,C.green)
+ local taskbar=themes[themeIndex] and themes[themeIndex].level and C.gray or accentColor
+ box(1,H-1,W,1,taskbar);put(1,H-1,themes[themeIndex] and themes[themeIndex].level and " L " or " XP Inicio ",C.white,themes[themeIndex] and themes[themeIndex].level and C.black or C.green)
  local x=12;for _,w in ipairs(windows) do if x<W-12 then put(x,H-1,"["..clipped(w.name,10).."]",C.white,w==active and C.lightBlue or accentColor);x=x+13 end end
  if createAlert then put(math.max(10,W-29),H-1,"CREATE STALLED",C.white,C.red) end
  put(math.max(1,W-9),H-1," "..os.date("%H:%M").." ",C.white,C.blue)
- box(1,H-2,W,1,C.lightGray);put(2,H-2,"XP Ultimate | "..status,C.black,C.lightGray)
+ box(1,H-2,W,1,themes[themeIndex] and themes[themeIndex].level and C.black or C.lightGray);put(2,H-2,"XP Ultimate | "..status,C.white,themes[themeIndex] and themes[themeIndex].level and C.black or C.lightGray)
  put(math.max(1,W-12),H-2,string.format("Desk %d/%d",desktopPage+1,math.max(1,math.ceil(#apps/(desktopColumns*desktopRows)))),C.blue,C.lightGray)
  if menu then
   local found=matchingApps();box(1,H-9,27,8,C.lightGray);box(1,H-9,27,1,accentColor)
