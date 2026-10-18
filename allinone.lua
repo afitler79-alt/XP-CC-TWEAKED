@@ -144,6 +144,11 @@ local paintColors={C.black,C.red,C.green,C.blue,C.orange,C.purple}
 local desktopRows,desktopColumns,desktopPage=4,3,0
 local userFile="/.xpultimate/users"
 local function clipped(s,n) s=tostring(s or ""); if #s>n then return s:sub(1,math.max(1,n-3)).."..." end; return s end
+local function currentShellDir()
+ if shell and type(shell.dir)=="function" then local ok,value=pcall(shell.dir);if ok and type(value)=="string" then return fs.combine("/",value) end end
+ if shell and type(shell.getRunningProgram)=="function" then local ok,value=pcall(shell.getRunningProgram);if ok and type(value)=="string" then return fs.getDir(value) end end
+ return "/"
+end
 local function appendWrapped(lines,text,width)
  width=math.max(8,width)
  for paragraph in tostring(text or ""):gmatch("[^\n]+") do
@@ -437,8 +442,8 @@ local function submitInput()
  elseif active.id=="cmd" then
   d.lines[#d.lines+1]="> "..value
   if value=="clear" then d.lines={}
-  elseif value=="pwd" then d.lines[#d.lines+1]=shell.dir()
-  elseif value=="ls" then for _,v in ipairs(fs.list(shell.dir())) do d.lines[#d.lines+1]=v end
+  elseif value=="pwd" then d.lines[#d.lines+1]=currentShellDir()
+  elseif value=="ls" then for _,v in ipairs(fs.list(currentShellDir())) do d.lines[#d.lines+1]=v end
   elseif value=="help" then d.lines[#d.lines+1]="Usa comandos de CraftOS (shell.run); cuidado con scripts externos."
   elseif value=="shutdown" then playSound("shutdown");os.shutdown()
   elseif value=="reboot" then os.reboot()
@@ -1178,6 +1183,17 @@ end
 local function luaMemory()
  local ok,value=pcall(collectgarbage,"count");return ok and math.floor(tonumber(value) or 0) or 0
 end
+local function currentDirectory()
+ if shell and type(shell.dir)=="function" then
+  local ok,value=pcall(shell.dir)
+  if ok and type(value)=="string" and value~="" then return fs.combine("/",value) end
+ end
+ if shell and type(shell.getRunningProgram)=="function" then
+  local ok,value=pcall(shell.getRunningProgram)
+  if ok and type(value)=="string" and value~="" then return fs.getDir(value) end
+ end
+ return "/"
+end
 local function loadTasks()
  if not fs.exists(TODO) then return {} end
  local f=fs.open(TODO,"r");if not f then return {} end
@@ -1261,7 +1277,7 @@ function M.lines(state)
   lines[#lines+1]=string.format("Archivos encontrados (max 500): %s",tostring(stats.files))
   lines[#lines+1]=string.format("Directorios encontrados (max 500): %s",tostring(stats.dirs))
   lines[#lines+1]=string.format("Espacio libre: %s",tostring(free))
-  lines[#lines+1]=string.format("Ruta de usuario: %s",tostring(shell.dir()))
+  lines[#lines+1]=string.format("Ruta de usuario: %s",currentDirectory())
   lines[#lines+1]="";lines[#lines+1]="Los datos se actualizan al volver a abrir este panel."
   return lines
  elseif page==7 then
