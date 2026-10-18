@@ -71,6 +71,31 @@ payload["/sys/kernel.lua"] = [=[
 -- Windows XP Ultimate CC: escritorio Luna para terminales CC:Tweaked.
 local W,H=term.getSize()
 local baseTerminal=term.current()
+-- Compatibility guard for CraftOS-PC: some Redirect objects omit isColor or
+-- other native terminal methods. Fill missing methods before every redirect.
+local nativeTerminal=term.native and term.native() or baseTerminal
+local rawTermRedirect=term.redirect
+if type(rawTermRedirect)=="function" then
+ term.redirect=function(target)
+  if type(target)=="table" then
+   if type(nativeTerminal)=="table" then
+    for method,fn in pairs(nativeTerminal) do
+     if type(method)=="string" and type(fn)=="function" and type(target[method])~="function" then
+      rawset(target,method,fn)
+     end
+    end
+   end
+   if type(target.isColor)~="function" then
+    rawset(target,"isColor",function()
+     local fn=baseTerminal and baseTerminal.isColor
+     if type(fn)=="function" then local ok,value=pcall(fn);if ok then return value end end
+     return false
+    end)
+   end
+  end
+  return rawTermRedirect(target)
+ end
+end
 local C=colors
 local apps={
  {id="computer",name="Mi PC",icon="[PC]"},{id="browser",name="Internet Explorer",icon="[WEB]"},
