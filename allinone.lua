@@ -497,6 +497,14 @@ local function redraw()
  if not renderSurface or renderParent~=parent or renderWidth~=W or renderHeight~=H then
   renderParent=parent;renderWidth=W;renderHeight=H
   renderSurface=window.create(parent,1,1,W,H,false)
+  -- Some ComputerCraft window terminals omit this method, but term.redirect
+  -- requires the complete terminal interface before accepting the buffer.
+  if type(renderSurface.isColor)~="function" then
+   renderSurface.isColor=function()
+    if type(parent.isColor)=="function" then return parent.isColor() end
+    return false
+   end
+  end
  end
  renderSurface.setVisible(false)
  local previousTerm=term.redirect(renderSurface)
