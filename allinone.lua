@@ -82,6 +82,8 @@ local apps={
  {id="clock",name="Cronometro",icon="[TIME]"},
  {id="games",name="Juegos XP",icon="[GAME]"},
  {id="tools",name="Centro de herramientas",icon="[TOOLS]"},
+ {id="ide",name="XP Visual Lua Studio",icon="[IDE]"},
+ {id="packages",name="Gestor de paquetes",icon="[PKG]"},
  {id="users",name="Cuentas de usuario",icon="[USR]"},
  {id="calculator",name="Calculadora",icon="[+ -]"},
  {id="paint",name="Paint XP",icon="[ART]"},
@@ -92,6 +94,7 @@ local menu,logged=false,false
 local menuSearch=""
 local username="Usuario"
 local inputMode,inputText=nil,""
+local suppressNextChar=false
 local status="Bienvenido a Windows XP Ultimate CC"
 local createAlert=false
 local createDevices={}
@@ -114,6 +117,8 @@ local calculator=dofile("/apps/calculator.lua")
 local studio=dofile("/apps/studio.lua")
 local games=dofile("/apps/games.lua")
 local tools=dofile("/apps/tools.lua")
+local ide=dofile("/apps/ide.lua")
+local packages=dofile("/apps/packages.lua")
 local soundOK,sounds=pcall(dofile,"/sys/sounds.lua")
 if not soundOK then sounds={play=function() return false end} end
 local soundEnabled=true
@@ -136,7 +141,7 @@ if fs.exists(settingsPath) then
  end
 end
 local paintColors={C.black,C.red,C.green,C.blue,C.orange,C.purple}
-local desktopRows=4
+local desktopRows,desktopColumns,desktopPage=4,3,0
 local userFile="/.xpultimate/users"
 local function clipped(s,n) s=tostring(s or ""); if #s>n then return s:sub(1,math.max(1,n-3)).."..." end; return s end
 local function appendWrapped(lines,text,width)
@@ -224,7 +229,10 @@ local function open(id)
  playSound("open")
  for _,w in ipairs(windows) do if w.id==id then w.min=false;active=w;return end end
  local name=id;for _,a in ipairs(apps) do if a.id==id then name=a.name end end
- local w={id=id,name=name,x=math.max(2,math.floor(W*.13)),y=2,w=math.max(24,math.floor(W*.74)),h=math.max(10,H-5),min=false,max=false,scroll=0,data={}}
+ local ww=math.max(1,math.min(W-2,math.max(24,math.floor(W*.74))))
+ local hh=math.max(4,math.min(math.max(4,H-4),math.max(10,H-5)))
+ local offset=(#windows%4)*2
+ local w={id=id,name=name,x=math.max(1,math.min(math.floor((W-ww)/2)+1+offset,W-ww+1)),y=math.max(1,math.min(2+offset,H-hh-2)),w=ww,h=hh,min=false,max=false,scroll=0,data={}}
  windows[#windows+1]=w;active=w
  if id=="browser" then
   w.data.url="https://www.google.es"
@@ -245,6 +253,8 @@ local function open(id)
  elseif id=="clock" then w.data.elapsed=0;w.data.running=false;w.data.started=0
  elseif id=="games" then w.data.game=games.new()
  elseif id=="tools" then w.data.tools=tools.new()
+ elseif id=="ide" then w.data.ide=ide.new()
+ elseif id=="packages" then w.data.packages=packages.new()
  elseif id=="paint" then w.data.pixels={};w.data.brush=paintColors[2]
  elseif id=="system" then w.data.lines={"Informacion del sistema"}
  end
@@ -288,6 +298,8 @@ local function appLines(w)
   lines={"Cronometro XP","",string.format("%02d:%02d.%02d",math.floor(elapsed/60),math.floor(elapsed)%60,math.floor(elapsed*100)%100),"","SPACE: iniciar/pausar","R: reiniciar"}
  elseif w.id=="games" then lines=games.lines(d.game)
  elseif w.id=="tools" then lines=tools.lines(d.tools)
+ elseif w.id=="ide" then lines=ide.lines(d.ide)
+ elseif w.id=="packages" then lines=packages.lines(d.packages)
  elseif w.id=="users" then lines={"Cuentas locales", "Usuario actual: "..username, "[A] Agregar cuenta local", "", "Cuentas:"};for _,u in ipairs(users) do lines[#lines+1]="- "..u.name end
  elseif w.id=="calculator" then lines={"Calculadora XP","Expresion: "..(d.expression or ""),"Resultado: "..(d.result or "Listo"),"","ENTER: calcular | + - * / % | parentesis"}
  elseif w.id=="studio" then lines=studio.lines(d.project,d.project.selected,d.project.page)
@@ -316,11 +328,28 @@ local function drawWindow(w)
   local visible=bottom-y0+1;local selectedLine=(w.data.project.selected or 1)+6
   if selectedLine>w.scroll+visible then w.scroll=math.min(max,selectedLine-visible) end
   if selectedLine<=w.scroll then w.scroll=math.max(0,selectedLine-1) end
+ elseif w.id=="ide" and w.data.ide.path then
+  local visible=bottom-y0+1;local selectedLine=w.data.ide.y+4
+  if selectedLine>w.scroll+visible then w.scroll=selectedLine-visible end
+  if selectedLine<=w.scroll then w.scroll=selectedLine-1 end
  end
  for i=y0,bottom do
   local lineIndex=i-y0+1+w.scroll
   local row=lines[lineIndex]
-  if w.id=="paint" and lineIndex>=4 then
+  if w.id=="ide" and w.data.ide.path and lineIndex>=5 and lineIndex<=#w.data.ide.lines+4 then
+   local codeLine=lineIndex-4;local source=w.data.ide.lines[codeLine] or ""
+   local visibleCode=math.max(1,ww-8)
+   if w.data.ide.x>w.data.ide.hscroll+visibleCode then w.data.ide.hscroll=w.data.ide.x-visibleCode end
+   if w.data.ide.x<=w.data.ide.hscroll then w.data.ide.hscroll=w.data.ide.x-1 end
+   local fg=C.black
+   if source:match("^%s*%-%-") then fg=C.green
+   else local first=source:match("^%s*([%a_]+)");local keywords={["local"]=true,["function"]=true,["if"]=true,["then"]=true,["else"]=true,["elseif"]=true,["end"]=true,["for"]=true,["while"]=true,["return"]=true,["do"]=true,["repeat"]=true,["until"]=true};if keywords[first] then fg=C.blue end end
+   put(x+2,i,string.format("%03d ",codeLine),C.gray,C.white);put(x+6,i,source:sub(w.data.ide.hscroll+1),fg,C.white)
+   if codeLine==w.data.ide.y then
+    local cx=x+5+w.data.ide.x-w.data.ide.hscroll
+    if cx<x+ww-1 then put(cx,i,"|",C.white,C.blue) end
+   end
+  elseif w.id=="paint" and lineIndex>=4 then
    local canvasRow=lineIndex-3
    for col=1,ww-4 do
     local pixel=w.data.pixels[canvasRow] and w.data.pixels[canvasRow][col]
@@ -350,10 +379,14 @@ local function redraw()
  local horizon=math.max(3,math.floor(H*.62))
  for y=horizon,H-2 do box(1,y,W,1,C.green) end
  put(1,horizon,string.rep("~",W),C.lime,C.green)
- local columns=math.max(1,math.floor((W-10)/15)+1)
+ desktopColumns=math.max(1,math.floor((W-10)/15)+1)
  desktopRows=math.max(1,math.floor((H-5)/3))
- for i,a in ipairs(apps) do local col=math.floor((i-1)/desktopRows);local row=(i-1)%desktopRows;local x=2+col*15;local y=2+row*3
-  if x<W-8 and y+1<H-3 then put(x,y,a.icon,C.yellow,wallpaper);put(x,y+1,clipped(a.name,13),C.white,C.blue) end
+ local perPage=desktopColumns*desktopRows;local pageCount=math.max(1,math.ceil(#apps/perPage));desktopPage=math.max(0,math.min(pageCount-1,desktopPage))
+ for slot=1,perPage do
+  local index=desktopPage*perPage+slot;local a=apps[index]
+  if a then local col=math.floor((slot-1)/desktopRows);local row=(slot-1)%desktopRows;local x=2+col*15;local y=2+row*3
+   if x<W-8 and y+1<H-3 then put(x,y,a.icon,C.yellow,wallpaper);put(x,y+1,clipped(a.name,13),C.white,C.blue) end
+  end
  end
  for _,w in ipairs(windows) do drawWindow(w) end
  box(1,H-1,W,1,C.blue);put(1,H-1," XP Inicio ",C.white,C.green)
@@ -361,6 +394,7 @@ local function redraw()
  if createAlert then put(math.max(10,W-29),H-1,"CREATE STALLED",C.white,C.red) end
  put(math.max(1,W-9),H-1," "..os.date("%H:%M").." ",C.white,C.blue)
  box(1,H-2,W,1,C.lightGray);put(2,H-2,"XP Ultimate | "..status,C.black,C.lightGray)
+ put(math.max(1,W-12),H-2,string.format("Desk %d/%d",desktopPage+1,math.max(1,math.ceil(#apps/(desktopColumns*desktopRows)))),C.blue,C.lightGray)
  if menu then
   local found=matchingApps();box(1,H-9,27,8,C.lightGray);box(1,H-9,27,1,C.blue)
   put(2,H-9,"Inicio: "..(menuSearch~="" and menuSearch or username),C.white,C.blue)
@@ -369,7 +403,7 @@ local function redraw()
  end
  if inputMode then box(2,H-3,W-4,2,C.black);put(3,H-3,inputMode..": "..inputText,C.white,C.black) end
 end
-local function startInput(mode,initial) inputMode=mode;inputText=initial or "" end
+local function startInput(mode,initial,suppressChar) inputMode=mode;inputText=initial or "";suppressNextChar=suppressChar==true end
 local function submitInput()
  local value=inputText;local mode=inputMode;inputMode=nil;inputText=""
  if active and active.id=="studio" and (mode=="studio-save" or mode=="studio-export" or mode=="studio-load" or mode=="studio-title" or mode=="studio-track") then
@@ -383,6 +417,18 @@ local function submitInput()
  end
  if active and active.id=="tools" and mode=="tool-task" then
   local ok,err=tools.addTask(active.data.tools,value);status=ok and "Tarea guardada" or tostring(err);return
+ end
+ if active and active.id=="ide" and mode=="ide-new" then
+  local ok,err=ide.newFile(active.data.ide,value);status=ok and "Programa creado" or tostring(err);return
+ end
+ if active and active.id=="ide" and mode=="ide-find" then
+  local ok,msg=ide.find(active.data.ide,value);status=msg or (ok and "Texto encontrado" or "Sin resultados");return
+ end
+ if active and active.id=="ide" and mode=="ide-replace-search" then
+  active.data.ide.pendingSearch=value;startInput("Texto nuevo","");inputMode="ide-replace-with";return
+ end
+ if active and active.id=="ide" and mode=="ide-replace-with" then
+  local count,msg=ide.replaceAll(active.data.ide,active.data.ide.pendingSearch or "",value);status=msg or ("Reemplazos: "..count);active.data.ide.pendingSearch=nil;return
  end
  if not active then return end
  local d=active.data
@@ -459,8 +505,11 @@ local function click(x,y)
   if (w.id=="computer" or w.id=="explorer") and row>=3 then local entry=w.data.entries[row-2];if entry then if entry.dir then w.data.path=fs.combine(w.data.path,entry.name);w.scroll=0 else w.data.path=fs.combine(w.data.path,entry.name);local txt=files.read(w.data.path);if txt then open("notepad");active.data.path=w.data.path;active.data.text=txt end end end end
   return
  end end
- -- Desktop icons, double click not required: click launches.
- local col=math.floor((x-2)/15);local row=math.floor((y-2)/3);local n=col*desktopRows+row+1;if y>=2 then local a=apps[n];if a then launch(a.id) end end
+ -- Click an icon once to launch; page keys expose additional shortcuts on small terminals.
+ local col=math.floor((x-2)/15);local row=math.floor((y-2)/3)
+ if x>=2 and row>=0 and row<desktopRows and col>=0 and col<desktopColumns then
+  local n=desktopPage*desktopColumns*desktopRows+col*desktopRows+row+1;local a=apps[n];if a then launch(a.id) end
+ end
 end
 local function dragWindow(x,y)
  if not active or not active.drag then return end
@@ -478,13 +527,35 @@ local function key(k)
   elseif k>=keys.one and k<=keys.six then local found=matchingApps();local app=found[k-keys.one+1];if app then launch(app.id) end end
   return
  end
+ if k==keys.pageUp then desktopPage=math.max(0,desktopPage-1);return end
+ if k==keys.pageDown then desktopPage=desktopPage+1;return end
  if k==keys.escape then menu=false;return end
  if not active then return end
  local w=active
  if w.id=="games" then games.key(w.data.game,k);return end
+ if w.id=="ide" then
+  local action=ide.key(w.data.ide,k)
+  if action=="newFile" then startInput("Nombre de archivo (ej. hola.lua)","");inputMode="ide-new"
+  elseif action=="run" then local ok,msg=ide.run(w.data.ide);status=msg or (ok and "Ejecucion terminada" or "Error al ejecutar")
+  elseif action=="find" then startInput("Buscar","");inputMode="ide-find"
+  elseif action=="replace" then startInput("Buscar texto","");inputMode="ide-replace-search"
+  elseif action and action~="redraw" then status=tostring(action) end
+  return
+ end
+ if w.id=="packages" then
+  local action=packages.key(w.data.packages,k)
+  if type(action)=="string" and action~="redraw" then
+   local output=window.create(term.current(),1,1,W,H,false);local previous=term.redirect(output)
+   local callOk,result=pcall(shell.run,action);term.redirect(previous)
+   local _,height=output.getSize();w.data.packages.output={}
+   for row=1,height do local line=output.getLine(row):gsub("%s+$","");if line~="" then w.data.packages.output[#w.data.packages.output+1]=line end end
+   w.data.packages.status=(callOk and result~=false) and "Programa terminado" or ("Programa terminado con errores")
+  elseif action and action~="redraw" then w.data.packages.status=tostring(action) end
+  return
+ end
  if w.id=="tools" then
   local result=tools.key(w.data.tools,k)
-  if result=="addTask" then startInput("Nueva tarea","") elseif result and result~="redraw" then status=result end
+  if result=="addTask" then startInput("Nueva tarea", "", true);inputMode="tool-task" elseif result and result~="redraw" then status=result end
   return
  end
  if k==keys.enter then
@@ -492,11 +563,11 @@ local function key(k)
   elseif w.id=="cmd" then startInput("CMD","")
   elseif w.id=="calculator" then startInput("Expresion",w.data.expression or "") end
  elseif k==keys.r and w.id=="create" then w.data.devices=ap.create()
- elseif k==keys.s and w.id=="create" then startInput("Indice lado rpm","")
- elseif k==keys.c and w.id=="create" then startInput("Redstone lado on/off","r:")
- elseif k==keys.a and w.id=="browser" then startInput("URL o busqueda",w.data.url)
+ elseif k==keys.s and w.id=="create" then startInput("Indice lado rpm","",true)
+ elseif k==keys.c and w.id=="create" then startInput("Redstone lado on/off","r:",true)
+ elseif k==keys.a and w.id=="browser" then startInput("URL o busqueda",w.data.url,true)
  elseif k==keys.p and w.id=="media" then local ok,err=audio.playNote(12);status=ok and "Nota reproducida" or err
- elseif k==keys.d and w.id=="media" then startInput("Ruta DFPWM","")
+ elseif k==keys.d and w.id=="media" then startInput("Ruta DFPWM","",true)
  elseif k==keys.space and w.id=="clock" then
   if w.data.running then w.data.elapsed=w.data.elapsed+math.max(0,os.clock()-w.data.started);w.data.running=false
   else w.data.started=os.clock();w.data.running=true end
@@ -510,11 +581,11 @@ local function key(k)
  elseif k==keys.enter and w.id=="taskmgr" then local target=w.data.targets and w.data.targets[w.data.selected or 1];if target then active=target;target.min=false;status="Ventana activada: "..target.name end
  elseif k==keys.x and w.id=="taskmgr" then local target=w.data.targets and w.data.targets[w.data.selected or 1];if target then for i,v in ipairs(windows) do if v==target then table.remove(windows,i);break end end;active=w;status="Ventana cerrada" end
  elseif k==keys.p and w.id=="studio" then local ok,err=studio.play(w.data.project);status=ok and "Reproduccion terminada" or err
- elseif k==keys.s and w.id=="studio" then startInput("Guardar proyecto en ruta","/xp_song.xpm");inputMode="studio-save"
- elseif k==keys.e and w.id=="studio" then startInput("Exportar reproductor Lua","/xp_song.lua");inputMode="studio-export"
- elseif k==keys.o and w.id=="studio" then startInput("Abrir proyecto .xpm","/xp_song.xpm");inputMode="studio-load"
- elseif k==keys.t and w.id=="studio" then startInput("Titulo de la cancion",w.data.project.title);inputMode="studio-title"
- elseif k==keys.r and w.id=="studio" then startInput("Nombre de la pista",w.data.project.tracks[w.data.project.selected].name);inputMode="studio-track"
+ elseif k==keys.s and w.id=="studio" then startInput("Guardar proyecto en ruta","/xp_song.xpm",true);inputMode="studio-save"
+ elseif k==keys.e and w.id=="studio" then startInput("Exportar reproductor Lua","/xp_song.lua",true);inputMode="studio-export"
+ elseif k==keys.o and w.id=="studio" then startInput("Abrir proyecto .xpm","/xp_song.xpm",true);inputMode="studio-load"
+ elseif k==keys.t and w.id=="studio" then startInput("Titulo de la cancion",w.data.project.title,true);inputMode="studio-title"
+ elseif k==keys.r and w.id=="studio" then startInput("Nombre de la pista",w.data.project.tracks[w.data.project.selected].name,true);inputMode="studio-track"
  elseif k==keys.a and w.id=="studio" then local ok,err=studio.addTrack(w.data.project);status=ok and "Pista nueva agregada" or err
  elseif k==keys.x and w.id=="studio" then local ok,err=studio.removeTrack(w.data.project);status=ok and "Pista eliminada" or err
  elseif k==keys.i and w.id=="studio" then studio.cycleInstrument(w.data.project)
@@ -527,13 +598,13 @@ local function key(k)
  elseif k==keys.left and w.id=="studio" then studio.page(w.data.project,w.data.project.page-1)
  elseif k==keys.right and w.id=="studio" then studio.page(w.data.project,w.data.project.page+1)
  elseif k==keys.backspace and (w.id=="computer" or w.id=="explorer") then w.data.path=fs.getDir(w.data.path);if w.data.path=="" then w.data.path="/" end;w.scroll=0
- elseif k==keys.e and w.id=="notepad" then startInput("Texto (sobrescribe archivo)",w.data.text)
+ elseif k==keys.e and w.id=="notepad" then startInput("Texto (sobrescribe archivo)",w.data.text,true)
  elseif k==keys.u and w.id=="control" then open("users")
  elseif k==keys.l and w.id=="control" then playSound("logoff");windows={};active=nil;logged=false
  elseif k==keys.a and w.id=="control" then setAutoStart(not getAutoStart())
  elseif k==keys.t and w.id=="control" then themeIndex=themeIndex%#themes+1;wallpaper=themes[themeIndex].wall;saveSettings();status="Tema aplicado: "..themes[themeIndex].name
- elseif k==keys.a and w.id=="users" then startInput("Nombre de cuenta","Nuevo usuario")
- elseif k==keys.m and w.id=="players" then startInput("Mensaje para Chat Box","")
+ elseif k==keys.a and w.id=="users" then startInput("Nombre de cuenta","Nuevo usuario",true)
+ elseif k==keys.m and w.id=="players" then startInput("Mensaje para Chat Box","",true)
  elseif k==keys.r and w.id=="system" then w.data.refresh=os.clock()
  elseif w.id=="paint" and k>=keys.one and k<=keys.six then w.data.brush=paintColors[k-keys.one+1]
  elseif w.id=="paint" and k==keys.c then w.data.pixels={}
@@ -541,11 +612,13 @@ local function key(k)
  end
 end
 local function char(c)
+ if suppressNextChar then suppressNextChar=false;return end
  if inputMode then inputText=inputText..c
  elseif menu then menuSearch=menuSearch..c
  elseif active and active.id=="studio" then
   if c=="+" or c=="=" then studio.tempo(active.data.project,5)
   elseif c=="-" then studio.tempo(active.data.project,-5) end
+ elseif active and active.id=="ide" then ide.char(active.data.ide,c)
  end
 end
 boot()
@@ -1208,6 +1281,190 @@ function M.addTask(state,text)
  if #state.tasks>=50 then return false,"Maximo 50 tareas" end
  state.tasks[#state.tasks+1]={text=text:sub(1,80),done=false};state.selected=#state.tasks;saveTasks(state);return true
 end
+return M
+]=]
+payload["/apps/ide.lua"] = [=[
+-- Editor Lua estilo IDE para CraftOS: proyectos, edicion, guardado y ejecucion manual.
+local M={}
+local ROOT="/Programs"
+local function safePath(path)
+ path=fs.combine(ROOT,tostring(path or ""))
+ if path==ROOT or path:sub(1,#ROOT+1)~=ROOT.."/" then return nil,"Ruta fuera de /Programs" end
+ return path
+end
+local function readLines(text)
+ local lines={};text=tostring(text or "")
+ for line in (text.."\n"):gmatch("(.-)\n") do lines[#lines+1]=line end
+ if #lines==0 then lines[1]="" end
+ return lines
+end
+local function listFiles()
+ if not fs.exists(ROOT) then fs.makeDir(ROOT) end
+ local out={};for _,name in ipairs(fs.list(ROOT)) do
+  if not fs.isDir(fs.combine(ROOT,name)) and name:lower():match("%.lua$") then out[#out+1]=name end
+ end
+ table.sort(out,function(a,b)return a:lower()<b:lower() end);return out
+end
+function M.new() return {path=nil,lines={},x=1,y=1,scroll=0,hscroll=0,selected=1,status="Listo",output={},dirty=false,files=listFiles()} end
+function M.refresh(state) state.files=listFiles();state.selected=math.max(1,math.min(#state.files, state.selected or 1)) end
+function M.open(state,path)
+ local full,err=safePath(path);if not full then return false,err end
+ if fs.isDir(full) then return false,"Abre un archivo .lua de /Programs" end
+ local f,e=fs.open(full,"r");if not f then return false,e end
+ local data=f.readAll();f.close();state.path=full;state.lines=readLines(data);state.x=1;state.y=1;state.scroll=0;state.hscroll=0;state.dirty=false;state.status="Abierto: "..full;return true
+end
+function M.newFile(state,name)
+ name=tostring(name or ""):gsub("^%s+",""):gsub("%s+$","")
+ if name=="" then return false,"Escribe un nombre de archivo" end
+ if not name:lower():match("%.lua$") then name=name..".lua" end
+ if name:find("[/\\]") or name=="." or name==".." then return false,"Nombre de archivo no valido" end
+ if not fs.exists(ROOT) then fs.makeDir(ROOT) end
+ local full=fs.combine(ROOT,name);if fs.exists(full) then return false,"Ese archivo ya existe" end
+ state.path=full;state.lines={"-- Nuevo programa Lua","print(\"Hola desde XP IDE\")"};state.x=1;state.y=1;state.hscroll=0;state.dirty=true;state.status="Archivo nuevo: "..full;return true
+end
+function M.save(state)
+ if not state.path then return false,"Crea o abre un archivo primero" end
+ local f,err=fs.open(state.path,"w");if not f then return false,err end
+ f.write(table.concat(state.lines,"\n"));f.close();state.dirty=false;state.status="Guardado: "..state.path;M.refresh(state);return true
+end
+function M.back(state)
+ if state.dirty then local ok,err=M.save(state);if not ok then state.status="No se pudo guardar: "..tostring(err);return false end end
+ state.path=nil;state.status="Proyecto /Programs";state.scroll=0;M.refresh(state);return true
+end
+function M.lines(state)
+ if not state.path then
+  local out={"XP Visual Lua Studio","Proyectos Lua en /Programs","F2: nuevo | ENTER: abrir | R: actualizar","", "Archivos:"}
+  if #state.files==0 then out[#out+1]="No hay programas. Pulsa N para crear uno." end
+  for i,name in ipairs(state.files) do out[#out+1]=(i==state.selected and "> " or "  ")..name end
+  out[#out+1]="";out[#out+1]=state.status;return out
+ end
+ local out={"XP Visual Lua Studio | "..fs.getName(state.path)..(state.dirty and " *" or ""),"F2: guardar | F5: ejecutar | F3: buscar | F4: reemplazar","Flechas mueven cursor | ENTER linea | TAB sangria | ESC volver",""}
+ for i,line in ipairs(state.lines) do out[#out+1]=string.format("%03d %s",i,line) end
+ out[#out+1]=""..state.status
+ if #state.output>0 then out[#out+1]="-- Salida de la ultima ejecucion --";for i=math.max(1,#state.output-4),#state.output do out[#out+1]=state.output[i] end end
+ return out
+end
+function M.key(state,key)
+ if not state.path then
+  if key==keys.up then state.selected=math.max(1,state.selected-1)
+  elseif key==keys.down then state.selected=math.min(math.max(1,#state.files),state.selected+1)
+  elseif key==keys.enter and state.files[state.selected] then local ok,err=M.open(state,state.files[state.selected]);return ok and "redraw" or err
+  elseif key==keys.f2 then return "newFile"
+  elseif key==keys.r then M.refresh(state) end
+  return "redraw"
+ end
+ local line=state.lines[state.y] or "";local x=math.max(1,math.min(state.x,#line+1))
+ if key==keys.escape then M.back(state)
+ elseif key==keys.f2 then local ok,err=M.save(state);if not ok then state.status=tostring(err) end
+ elseif key==keys.f5 then return "run"
+ elseif key==keys.f3 then return "find"
+ elseif key==keys.f4 then return "replace"
+ elseif key==keys.left then state.x=math.max(1,x-1)
+ elseif key==keys.right then state.x=math.min(#line+1,x+1)
+ elseif key==keys.up then state.y=math.max(1,state.y-1);state.x=math.min(state.x,#(state.lines[state.y] or "")+1)
+ elseif key==keys.down then state.y=math.min(#state.lines,state.y+1);state.x=math.min(state.x,#(state.lines[state.y] or "")+1)
+ elseif key==keys.home then state.x=1
+ elseif key==keys["end"] then state.x=#line+1
+ elseif key==keys.backspace then
+  state.dirty=true
+  if x>1 then state.lines[state.y]=line:sub(1,x-2)..line:sub(x);state.x=x-1
+  elseif state.y>1 then local prev=state.lines[state.y-1];state.x=#prev+1;state.lines[state.y-1]=prev..line;table.remove(state.lines,state.y);state.y=state.y-1 end
+ elseif key==keys.delete then
+  state.dirty=true
+  if x<=#line then state.lines[state.y]=line:sub(1,x-1)..line:sub(x+1)
+  elseif state.y<#state.lines then state.lines[state.y]=line..state.lines[state.y+1];table.remove(state.lines,state.y+1) end
+ elseif key==keys.enter then
+  state.dirty=true
+  local before,after=line:sub(1,x-1),line:sub(x);local indent=before:match("^%s*") or ""
+  local first=before:match("^%s*([%a_]+)")
+  if before:match("then%s*$") or before:match("do%s*$") or first=="function" then indent=indent.."  " end
+  state.lines[state.y]=before;table.insert(state.lines,state.y+1,indent..after);state.y=state.y+1;state.x=#indent+1
+ elseif key==keys.tab then state.dirty=true;state.lines[state.y]=line:sub(1,x-1).."  "..line:sub(x);state.x=x+2 end
+ return "redraw"
+end
+function M.char(state,char)
+ if not state.path then return end
+ local line=state.lines[state.y] or "";local x=math.max(1,math.min(state.x,#line+1))
+ state.lines[state.y]=line:sub(1,x-1)..char..line:sub(x);state.x=x+#char;state.dirty=true
+end
+function M.find(state,needle)
+ if not needle or needle=="" then return false,"Busqueda vacia" end
+ local startY,startX=state.y,state.x+1
+ for pass=1,2 do
+  local first=pass==1 and startY or 1;local last=pass==1 and #state.lines or startY
+  for y=first,last do
+   local from=(pass==1 and y==startY) and startX or 1
+   local x=(state.lines[y] or ""):find(needle,from,true)
+   if x then state.y=y;state.x=x;state.status="Encontrado en linea "..y;return true end
+  end
+ end
+ state.status="No se encontro: "..needle;return false,state.status
+end
+function M.replaceAll(state,needle,replacement)
+ if not needle or needle=="" then return 0,"Texto de busqueda vacio" end
+ local count=0
+ for i,line in ipairs(state.lines) do
+  local out={};local from=1
+  while true do local a,b=line:find(needle,from,true);if not a then out[#out+1]=line:sub(from);break end;out[#out+1]=line:sub(from,a-1);out[#out+1]=replacement;from=b+1;count=count+1 end
+  state.lines[i]=table.concat(out)
+ end
+ if count>0 then state.dirty=true end
+ state.status="Reemplazos: "..count;return count,state.status
+end
+function M.cursor(state) return state.x,state.y end
+function M.run(state)
+ if not state.path then return false,"Abre un programa primero" end
+ local ok,err=M.save(state);if not ok then return false,err end
+ local sw,sh=term.getSize();local w=window.create(term.current(),1,1,sw,sh,false)
+ local previous=term.redirect(w);local callOk,result=pcall(shell.run,state.path);term.redirect(previous)
+ local success=callOk and result~=false
+ state.output={}
+ local _,height=w.getSize()
+ for row=1,height do local line=w.getLine(row);line=line:gsub("%s+$","");if line~="" then state.output[#state.output+1]=line end end
+ if not callOk then state.output[#state.output+1]=tostring(result) end
+ state.status=success and "Ejecucion terminada (F5)" or "Error al ejecutar"
+ return success,state.status
+end
+return M
+]=]
+payload["/apps/packages.lua"] = [=[
+-- Gestor local de paquetes. Solo instala catalogo incluido; ejecutar es una accion manual.
+local M={}
+local ROOT="/packages"
+local catalog={
+ {id="hello",name="Hola mundo",version="1.0",description="Ejemplo comentado de programa Lua.",source="-- Hola Mundo para CC:Tweaked\nprint('Hola desde Windows XP Ultimate CC!')\nprint('Computer ID: '..os.getComputerID())\n"},
+ {id="hardware",name="Inspector de perifericos",version="1.0",description="Lista perifericos y sus tipos.",source="print('Perifericos conectados:')\nfor _,name in ipairs(peripheral.getNames()) do\n local kinds=peripheral.getType(name)\n print(name..' - '..(type(kinds)=='table' and table.concat(kinds, ', ') or tostring(kinds)))\nend\n"},
+ {id="redstone",name="Prueba Redstone",version="1.0",description="Muestra entradas y salidas; no altera el circuito.",source="for _,side in ipairs({'top','bottom','left','right','front','back'}) do\n print(side..' IN='..tostring(redstone.getInput(side))..' OUT='..tostring(redstone.getOutput(side)))\nend\n"},
+ {id="diskinfo",name="Informe del sistema",version="1.0",description="Muestra sistema, memoria y espacio disponible.",source="print(os.version())\nprint('ID: '..os.getComputerID())\nprint('Memoria Lua: '..math.floor(collectgarbage('count'))..' KB')\nif fs.getFreeSpace then print('Espacio libre: '..tostring(fs.getFreeSpace('/'))) end\n"},
+ {id="clock",name="Reloj de consola",version="1.0",description="Imprime fecha y hora del ordenador.",source="print('Fecha: '..os.date('%Y-%m-%d'))\nprint('Hora: '..os.date('%H:%M:%S'))\n"},
+}
+local function path(id)return fs.combine(ROOT,id..".lua") end
+local function installed(id)return fs.exists(path(id)) end
+function M.new() return {selected=1,status="Catalogo local; ejecutar requiere confirmacion manual."} end
+function M.lines(state)
+ local out={"XP Package Manager","Catalogo local | I instalar | X quitar","R ejecutar paquete instalado | flechas seleccionar",""}
+ for i,p in ipairs(catalog) do out[#out+1]=(i==state.selected and "> " or "  ")..p.name.." v"..p.version..(installed(p.id) and " [INSTALADO]" or "") end
+ local p=catalog[state.selected];if p then out[#out+1]="";out[#out+1]=p.description;out[#out+1]="ID: "..p.id end
+ out[#out+1]="";out[#out+1]=state.status;out[#out+1]="Ruta: /packages"
+ for _,line in ipairs(state.output or {}) do out[#out+1]=line end
+ return out
+end
+function M.key(state,key)
+ if key==keys.up then state.selected=math.max(1,state.selected-1)
+ elseif key==keys.down then state.selected=math.min(#catalog,state.selected+1)
+ elseif key==keys.i then
+  local p=catalog[state.selected];if not fs.exists(ROOT) then fs.makeDir(ROOT) end
+  if installed(p.id) then state.status="Ya esta instalado"
+  else local f,err=fs.open(path(p.id),"w");if not f then state.status=tostring(err) else f.write(p.source);f.close();state.status="Instalado: "..p.name end end
+ elseif key==keys.x then
+  local p=catalog[state.selected];if installed(p.id) then fs.delete(path(p.id));state.status="Desinstalado: "..p.name else state.status="El paquete no esta instalado" end
+ elseif key==keys.r then local p=catalog[state.selected];if installed(p.id) then return path(p.id) else state.status="Instala el paquete antes de ejecutarlo" end end
+ return "redraw"
+end
+function M.isPackage(pathname)
+ return type(pathname)=="string" and pathname:sub(1,#ROOT+1)==ROOT.."/" and fs.exists(pathname)
+end
+function M.catalog() return catalog end
 return M
 ]=]
 payload["/apps/calculator.lua"] = [=[
