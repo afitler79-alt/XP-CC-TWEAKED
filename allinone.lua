@@ -154,9 +154,9 @@ local soundOK,sounds=pcall(dofile,"/sys/sounds.lua")
 if not soundOK then sounds={play=function() return false end} end
 local soundEnabled=true
 local function playSound(name) if soundEnabled then pcall(sounds.play,name) end end
-local wallpaper=C.cyan
-local accentColor=C.gray
-local themes={{name="LevelOS Aqua",wall=C.cyan,accent=C.gray,level=true},{name="Luna azul",wall=C.lightBlue,accent=C.blue},{name="Aqua",wall=C.cyan,accent=C.blue},{name="Violeta",wall=C.purple,accent=C.blue},{name="Cielo",wall=C.lightBlue,accent=C.cyan},{name="Bosque",wall=C.lime,accent=C.green},{name="Atardecer",wall=C.orange,accent=C.red}}
+local wallpaper=C.lightBlue
+local accentColor=C.blue
+local themes={{name="Luna azul",wall=C.lightBlue,accent=C.blue},{name="Aqua",wall=C.cyan,accent=C.blue},{name="Violeta",wall=C.purple,accent=C.blue},{name="Cielo",wall=C.lightBlue,accent=C.cyan},{name="Bosque",wall=C.lime,accent=C.green},{name="Atardecer",wall=C.orange,accent=C.red}}
 local themeIndex=1
 local settingsPath="/.xpultimate/settings"
 local monitorSetting="/.xpultimate/monitor"
@@ -482,16 +482,12 @@ end
 local function drawWindow(w)
  if w.min then return end
  local x,y,ww,hh=w.x,w.y,w.w,w.h
- local levelTheme=themes[themeIndex] and themes[themeIndex].level
- local frame=levelTheme and C.gray or C.gray
- local body=levelTheme and C.lightGray or C.white
- local title=levelTheme and C.gray or accentColor
  -- Shadows are kept inside the desktop; they must never paint over the status strip.
  if y+hh < H-2 then box(x+1,y+hh,ww,1,C.black) end
  if x+ww<=W and y+1<=H-3 then box(x+ww,y+1,1,math.max(0,math.min(hh,H-3-y)),C.gray) end
- box(x,y,ww,hh,frame);box(x+1,y+1,ww-2,hh-2,body);box(x+1,y,ww-2,1,title)
- put(x+2,y," "..clipped(w.name,math.max(1,ww-18)),C.white,title)
- put(x+ww-13,y," - ",C.white,title);put(x+ww-9,y," + ",C.white,title);put(x+ww-5,y," X ",C.white,C.red)
+ box(x,y,ww,hh,C.gray);box(x+1,y+1,ww-2,hh-2,C.white);box(x+1,y,ww-2,1,accentColor)
+ put(x+2,y," "..clipped(w.name,math.max(1,ww-18)),C.white,accentColor)
+ put(x+ww-13,y,"[_]",C.white,C.lightBlue);put(x+ww-9,y,"[+]",C.white,C.lightBlue);put(x+ww-5,y,"[X]",C.white,C.red)
  if not w.max and ww>=3 and hh>=3 then put(x+ww-2,y+hh-1,"#",C.white,C.gray) end
  local y0=y+2;local bottom=math.min(H-3,y+hh-2)
  local lines=appLines(w);local max=math.max(0,#lines-(bottom-y0+1));w.scroll=math.max(0,math.min(w.scroll,max))
@@ -542,7 +538,7 @@ local function drawWindow(w)
     pcall(term.setCursorPos,x+2,i)
     if type(term.blit)=="function" then pcall(term.blit,pixelRow[1],pixelRow[2],pixelRow[3]) end
    end
-  elseif row then put(x+2,i,row,C.black,body) end
+  elseif row then put(x+2,i,row,C.black,C.white) end
  end
 end
 local function redraw()
@@ -565,24 +561,14 @@ local function redraw()
  end
  for _,d in ipairs(createDevices) do for side,value in pairs(d.stress) do local cap=d.capacity[side];if cap and cap>0 and value>=cap then createAlert=true end end end
  term.setBackgroundColor(wallpaper);term.clear()
- if themes[themeIndex] and themes[themeIndex].level then
-  -- Fondo pixelado inspirado en LevelOS V2.4: cielo, nubes escalonadas y campo.
-  box(1,1,W,H,C.cyan)
-  local cloudX=math.max(2,math.floor(W*.42));local cloudY=math.max(3,math.floor(H*.16))
-  box(cloudX,cloudY,12,2,C.white);box(cloudX+3,cloudY-1,8,1,C.white);box(cloudX+2,cloudY+2,15,1,C.gray)
-  local cloud2=math.max(4,math.floor(W*.78));box(cloud2,math.max(5,cloudY+4),8,2,C.white);box(cloud2+2,math.max(4,cloudY+3),4,1,C.white);box(cloud2+1,math.max(7,cloudY+6),10,1,C.gray)
-  local horizon=math.max(5,math.floor(H*.62));for y=horizon,H-2 do box(1,y,W,y%2==0 and C.lime or C.green) end
-  for x=4,W,9 do box(x,horizon-1,2,2,C.green) end
- else
-  -- Fondo XP clásico.
-  box(1,1,W,H,wallpaper)
-  put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
-  put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
-  put(math.max(1,W-22),4,"(____)(____)",C.white,C.lightBlue)
-  local horizon=math.max(3,math.floor(H*.62))
-  for y=horizon,H-2 do box(1,y,W,1,C.green) end
-  put(1,horizon,string.rep("~",W),C.lime,C.green)
- end
+ -- Cielo Luna con sol, nubes y pradera.
+ box(1,1,W,H,wallpaper)
+ put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
+ put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
+ put(math.max(1,W-22),4,"(____)(____)",C.white,C.lightBlue)
+ local horizon=math.max(3,math.floor(H*.62))
+ for y=horizon,H-2 do box(1,y,W,1,C.green) end
+ put(1,horizon,string.rep("~",W),C.lime,C.green)
  desktopColumns=math.max(1,math.floor((W-10)/15)+1)
  desktopRows=math.max(1,math.floor((H-5)/3))
  local perPage=desktopColumns*desktopRows;local pageCount=math.max(1,math.ceil(#apps/perPage));desktopPage=math.max(0,math.min(pageCount-1,desktopPage))
@@ -593,12 +579,11 @@ local function redraw()
   end
  end
  for _,w in ipairs(windows) do drawWindow(w) end
- local taskbar=themes[themeIndex] and themes[themeIndex].level and C.gray or accentColor
- box(1,H-1,W,1,taskbar);put(1,H-1,themes[themeIndex] and themes[themeIndex].level and " L " or " XP Inicio ",C.white,themes[themeIndex] and themes[themeIndex].level and C.black or C.green)
+ box(1,H-1,W,1,accentColor);put(1,H-1," XP Inicio ",C.white,C.green)
  local x=12;for _,w in ipairs(windows) do if x<W-12 then put(x,H-1,"["..clipped(w.name,10).."]",C.white,w==active and C.lightBlue or accentColor);x=x+13 end end
  if createAlert then put(math.max(10,W-29),H-1,"CREATE STALLED",C.white,C.red) end
  put(math.max(1,W-9),H-1," "..os.date("%H:%M").." ",C.white,C.blue)
- box(1,H-2,W,1,themes[themeIndex] and themes[themeIndex].level and C.black or C.lightGray);put(2,H-2,"XP Ultimate | "..status,C.white,themes[themeIndex] and themes[themeIndex].level and C.black or C.lightGray)
+ box(1,H-2,W,1,C.lightGray);put(2,H-2,"XP Ultimate | "..status,C.black,C.lightGray)
  put(math.max(1,W-12),H-2,string.format("Desk %d/%d",desktopPage+1,math.max(1,math.ceil(#apps/(desktopColumns*desktopRows)))),C.blue,C.lightGray)
  if menu then
   local found=matchingApps();box(1,H-9,27,8,C.lightGray);box(1,H-9,27,1,accentColor)
