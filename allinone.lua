@@ -117,7 +117,7 @@ local apps={
  {id="calculator",name="Calculadora",icon="[+ -]"},
  {id="paint",name="Paint XP",icon="[ART]"},
  {id="system",name="Informacion del sistema",icon="[PC+]"},
-}1
+ }
 local windows,active={},nil
 local renderSurface,renderParent,renderWidth,renderHeight=nil,nil,0,0
 local menu,logged=false,false
