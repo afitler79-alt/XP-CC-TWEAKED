@@ -70,6 +70,7 @@ end
 payload["/sys/kernel.lua"] = [=[
 -- Windows XP Ultimate CC: escritorio Luna para terminales CC:Tweaked.
 local W,H=term.getSize()
+local baseTerminal=term.current()
 local C=colors
 local apps={
  {id="computer",name="Mi PC",icon="[PC]"},{id="browser",name="Internet Explorer",icon="[WEB]"},
@@ -125,9 +126,60 @@ if not soundOK then sounds={play=function() return false end} end
 local soundEnabled=true
 local function playSound(name) if soundEnabled then pcall(sounds.play,name) end end
 local wallpaper=C.lightBlue
+local accentColor=C.blue
 local themes={{name="Luna azul",wall=C.lightBlue,accent=C.blue},{name="Aqua",wall=C.cyan,accent=C.blue},{name="Violeta",wall=C.purple,accent=C.blue},{name="Cielo",wall=C.lightBlue,accent=C.cyan},{name="Bosque",wall=C.lime,accent=C.green},{name="Atardecer",wall=C.orange,accent=C.red}}
 local themeIndex=1
 local settingsPath="/.xpultimate/settings"
+local monitorSetting="/.xpultimate/monitor"
+local selectedDisplay="terminal"
+local function listExternalMonitors()
+ local result={}
+ if not peripheral or type(peripheral.getNames)~="function" then return result end
+ for _,name in ipairs(peripheral.getNames()) do
+  local ok,kinds=pcall(peripheral.getType,name)
+  local typeName=type(kinds)=="table" and table.concat(kinds," ") or tostring(kinds or "")
+  if typeName:lower():find("monitor",1,true) then
+   local wrappedOk,device=pcall(peripheral.wrap,name)
+   if wrappedOk and device and type(device.getSize)=="function" and type(device.write)=="function" then
+    result[#result+1]={name=name,device=device}
+   end
+  end
+ end
+ table.sort(result,function(a,b)return a.name<b.name end)
+ return result
+end
+local function applyDisplay(name,persist)
+ local output=baseTerminal
+ if name~="terminal" then
+  for _,entry in ipairs(listExternalMonitors()) do
+   if entry.name==name then
+    output=entry.device
+    if type(output.setTextScale)=="function" then pcall(output.setTextScale,0.5) end
+    break
+   end
+  end
+  if output==baseTerminal then name="terminal" end
+ end
+ local ok,err=pcall(term.redirect,output)
+ if not ok then output=baseTerminal;name="terminal";pcall(term.redirect,output);status="No se pudo activar la pantalla: "..tostring(err) end
+ selectedDisplay=name
+ W,H=term.getSize()
+ renderSurface=nil;renderParent=nil;renderWidth=0;renderHeight=0
+ if persist then
+  if not fs.exists("/.xpultimate") then fs.makeDir("/.xpultimate") end
+  local file=fs.open(monitorSetting,"w")
+  if file then file.write(selectedDisplay);file.close() end
+ end
+end
+local function cycleDisplay()
+ local choices={{name="terminal"}}
+ for _,entry in ipairs(listExternalMonitors()) do choices[#choices+1]=entry end
+ local current=1
+ for i,entry in ipairs(choices) do if entry.name==selectedDisplay then current=i;break end end
+ local nextEntry=choices[current%#choices+1]
+ applyDisplay(nextEntry.name,true)
+ status=selectedDisplay=="terminal" and "Pantalla: terminal CraftOS" or ("Pantalla: monitor "..selectedDisplay)
+end
 local function saveSettings()
  if not fs.exists("/.xpultimate") then fs.makeDir("/.xpultimate") end
  local f=fs.open(settingsPath,"w");if f then f.write(textutils.serialize({theme=themeIndex,sounds=soundEnabled}));f.close() end
@@ -136,7 +188,7 @@ if fs.exists(settingsPath) then
  local f=fs.open(settingsPath,"r")
  if f then local ok,saved=pcall(textutils.unserialize,f.readAll());f.close()
   if ok and type(saved)=="table" then
-   themeIndex=math.max(1,math.min(#themes,tonumber(saved.theme) or 1));wallpaper=themes[themeIndex].wall
+   themeIndex=math.max(1,math.min(#themes,tonumber(saved.theme) or 1));wallpaper=themes[themeIndex].wall;accentColor=themes[themeIndex].accent
    if type(saved.sounds)=="boolean" then soundEnabled=saved.sounds end
   end
  end
@@ -286,7 +338,8 @@ local function appLines(w)
   if #devices==0 then lines[#lines+1]="No se encontraron lectores de Create compatibles." end
  elseif w.id=="control" then lines={"Panel de control","[U] Administrar usuarios","[L] Cerrar sesion","[A] Autostart: "..(getAutoStart() and "ACTIVADO" or "DESACTIVADO"),"HTTP API: "..tostring(http and http.get~=nil)}
  elseif w.id=="settings" then
-  lines={"Ajustes de Windows XP Ultimate","Flechas: elegir tema | ENTER: aplicar","S: sonidos de interfaz - "..(soundEnabled and "ACTIVADOS" or "DESACTIVADOS"),"Temas disponibles:"}
+  local monitorCount=#listExternalMonitors()
+  lines={"Ajustes de Windows XP Ultimate","Flechas: elegir tema | ENTER: aplicar","S: sonidos - "..(soundEnabled and "ACTIVADOS" or "DESACTIVADOS"),"M: cambiar pantalla de salida","Pantalla actual: "..(selectedDisplay=="terminal" and "CraftOS" or selectedDisplay),"Monitores externos: "..monitorCount,"Temas disponibles:"}
   for i,t in ipairs(themes) do lines[#lines+1]=(i==w.data.theme and "> " or "  ")..i..". "..t.name end
  elseif w.id=="taskmgr" then
   lines={"Administrador de tareas","Flechas: seleccionar | ENTER: activar","X: cerrar ventana seleccionada",""};w.data.targets={}
@@ -323,9 +376,10 @@ local function drawWindow(w)
  -- Shadows are kept inside the desktop; they must never paint over the status strip.
  if y+hh < H-2 then box(x+1,y+hh,ww,1,C.black) end
  if x+ww<=W and y+1<=H-3 then box(x+ww,y+1,1,math.max(0,math.min(hh,H-3-y)),C.gray) end
- box(x,y,ww,hh,C.gray);box(x+1,y+1,ww-2,hh-2,C.white);box(x+1,y,ww-2,1,C.blue)
- put(x+2,y," "..clipped(w.name,math.max(1,ww-18)),C.white,C.blue)
+ box(x,y,ww,hh,C.gray);box(x+1,y+1,ww-2,hh-2,C.white);box(x+1,y,ww-2,1,accentColor)
+ put(x+2,y," "..clipped(w.name,math.max(1,ww-18)),C.white,accentColor)
  put(x+ww-13,y,"[_]",C.white,C.lightBlue);put(x+ww-9,y,"[+]",C.white,C.lightBlue);put(x+ww-5,y,"[X]",C.white,C.red)
+ if not w.max and ww>=3 and hh>=3 then put(x+ww-2,y+hh-1,"#",C.white,C.gray) end
  local y0=y+2;local bottom=math.min(H-3,y+hh-2)
  local lines=appLines(w);local max=math.max(0,#lines-(bottom-y0+1));w.scroll=math.max(0,math.min(w.scroll,max))
  if w.id=="studio" then
@@ -392,7 +446,7 @@ local function redraw()
  for _,d in ipairs(createDevices) do for side,value in pairs(d.stress) do local cap=d.capacity[side];if cap and cap>0 and value>=cap then createAlert=true end end end
  term.setBackgroundColor(wallpaper);term.clear()
  -- Cielo Luna con sol, nubes y pradera.
- box(1,1,W,H,C.lightBlue)
+ box(1,1,W,H,wallpaper)
  put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
  put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
  put(math.max(1,W-22),4,"(____)(____)",C.white,C.lightBlue)
@@ -405,19 +459,19 @@ local function redraw()
  for slot=1,perPage do
   local index=desktopPage*perPage+slot;local a=apps[index]
   if a then local col=math.floor((slot-1)/desktopRows);local row=(slot-1)%desktopRows;local x=2+col*15;local y=2+row*3
-   if x<W-8 and y+1<H-3 then put(x,y,a.icon,C.yellow,wallpaper);put(x,y+1,clipped(a.name,13),C.white,C.blue) end
+   if x<W-8 and y+1<H-3 then put(x,y,a.icon,C.yellow,wallpaper);put(x,y+1,clipped(a.name,13),C.white,accentColor) end
   end
  end
  for _,w in ipairs(windows) do drawWindow(w) end
- box(1,H-1,W,1,C.blue);put(1,H-1," XP Inicio ",C.white,C.green)
- local x=12;for _,w in ipairs(windows) do if x<W-12 then put(x,H-1,"["..clipped(w.name,10).."]",C.white,w==active and C.lightBlue or C.blue);x=x+13 end end
+ box(1,H-1,W,1,accentColor);put(1,H-1," XP Inicio ",C.white,C.green)
+ local x=12;for _,w in ipairs(windows) do if x<W-12 then put(x,H-1,"["..clipped(w.name,10).."]",C.white,w==active and C.lightBlue or accentColor);x=x+13 end end
  if createAlert then put(math.max(10,W-29),H-1,"CREATE STALLED",C.white,C.red) end
  put(math.max(1,W-9),H-1," "..os.date("%H:%M").." ",C.white,C.blue)
  box(1,H-2,W,1,C.lightGray);put(2,H-2,"XP Ultimate | "..status,C.black,C.lightGray)
  put(math.max(1,W-12),H-2,string.format("Desk %d/%d",desktopPage+1,math.max(1,math.ceil(#apps/(desktopColumns*desktopRows)))),C.blue,C.lightGray)
  if menu then
-  local found=matchingApps();box(1,H-9,27,8,C.lightGray);box(1,H-9,27,1,C.blue)
-  put(2,H-9,"Inicio: "..(menuSearch~="" and menuSearch or username),C.white,C.blue)
+  local found=matchingApps();box(1,H-9,27,8,C.lightGray);box(1,H-9,27,1,accentColor)
+  put(2,H-9,"Inicio: "..(menuSearch~="" and menuSearch or username),C.white,accentColor)
   for i=1,math.min(6,#found) do put(2,H-9+i,i..". "..found[i].name,C.black,C.lightGray) end
   put(2,H-2,"0. Apagar equipo",C.white,C.green)
  end
@@ -500,6 +554,9 @@ local function click(x,y)
  for i=#windows,1,-1 do local w=windows[i];if not w.min and x>=w.x and x<w.x+w.w and y>=w.y and y<w.y+w.h then
   active=w
   if i<#windows then table.remove(windows,i);windows[#windows+1]=w end
+  if not w.max and x>=w.x+w.w-3 and y>=w.y+w.h-2 then
+   w.resize={x=x,y=y,w=w.w,h=w.h};w.drag=nil;return
+  end
   if y==w.y then if x>=w.x+w.w-4 then playSound("close");for j,v in ipairs(windows) do if v==w then table.remove(windows,j);break end end;active=windows[#windows]
     elseif x>=w.x+w.w-7 and x<=w.x+w.w-6 then w.max=not w.max;if w.max then w.old={w.x,w.y,w.w,w.h};w.x=1;w.y=1;w.w=W;w.h=math.max(4,H-3) else w.x,w.y,w.w,w.h=unpack(w.old) end
     elseif x>=w.x+w.w-11 and x<=w.x+w.w-10 then w.min=true
@@ -507,7 +564,8 @@ local function click(x,y)
   local row=y-w.y-2+w.scroll
   if w.id=="settings" then
    local choice=y-(w.y+5)+w.scroll
-   if choice>=1 and choice<=#themes then w.data.theme=choice;themeIndex=choice;wallpaper=themes[choice].wall;status="Tema aplicado: "..themes[choice].name;return end
+  choice=choice-3
+  if choice>=1 and choice<=#themes then w.data.theme=choice;themeIndex=choice;wallpaper=themes[choice].wall;accentColor=themes[choice].accent;saveSettings();status="Tema aplicado: "..themes[choice].name;return end
   elseif w.id=="taskmgr" then
    local choice=y-(w.y+5)+w.scroll
    if w.data.targets and w.data.targets[choice] then w.data.selected=choice;return end
@@ -534,7 +592,14 @@ local function click(x,y)
  end
 end
 local function dragWindow(x,y)
- if not active or not active.drag then return end
+ if not active or (not active.drag and not active.resize) then return end
+ if active.resize then
+  local r=active.resize
+  local maxW=math.max(1,W-active.x+1);local maxH=math.max(4,H-active.y-2)
+  active.w=math.max(math.min(18,maxW),math.min(maxW,r.w+x-r.x))
+  active.h=math.max(math.min(6,maxH),math.min(maxH,r.h+y-r.y))
+  return
+ end
  active.x=math.max(1,math.min(W-active.w+1,x-active.drag[1]))
  active.y=math.max(1,math.min(math.max(1,H-active.h-2),y-active.drag[2]))
 end
@@ -595,9 +660,10 @@ local function key(k)
   else w.data.started=os.clock();w.data.running=true end
  elseif k==keys.r and w.id=="clock" then w.data.elapsed=0;w.data.started=os.clock()
  elseif k==keys.s and w.id=="settings" then soundEnabled=not soundEnabled;saveSettings();status="Sonidos "..(soundEnabled and "activados" or "desactivados")
+ elseif k==keys.m and w.id=="settings" then cycleDisplay()
  elseif k==keys.up and w.id=="settings" then w.data.theme=math.max(1,w.data.theme-1)
  elseif k==keys.down and w.id=="settings" then w.data.theme=math.min(#themes,w.data.theme+1)
- elseif k==keys.enter and w.id=="settings" then themeIndex=w.data.theme;wallpaper=themes[themeIndex].wall;saveSettings();status="Tema aplicado: "..themes[themeIndex].name
+ elseif k==keys.enter and w.id=="settings" then themeIndex=w.data.theme;wallpaper=themes[themeIndex].wall;accentColor=themes[themeIndex].accent;saveSettings();status="Tema aplicado: "..themes[themeIndex].name
  elseif k==keys.up and w.id=="taskmgr" then w.data.selected=math.max(1,(w.data.selected or 1)-1)
  elseif k==keys.down and w.id=="taskmgr" then w.data.selected=(w.data.selected or 1)+1
  elseif k==keys.enter and w.id=="taskmgr" then local target=w.data.targets and w.data.targets[w.data.selected or 1];if target then active=target;target.min=false;status="Ventana activada: "..target.name end
@@ -624,7 +690,7 @@ local function key(k)
  elseif k==keys.u and w.id=="control" then open("users")
  elseif k==keys.l and w.id=="control" then playSound("logoff");windows={};active=nil;logged=false
  elseif k==keys.a and w.id=="control" then setAutoStart(not getAutoStart())
- elseif k==keys.t and w.id=="control" then themeIndex=themeIndex%#themes+1;wallpaper=themes[themeIndex].wall;saveSettings();status="Tema aplicado: "..themes[themeIndex].name
+ elseif k==keys.t and w.id=="control" then themeIndex=themeIndex%#themes+1;wallpaper=themes[themeIndex].wall;accentColor=themes[themeIndex].accent;saveSettings();status="Tema aplicado: "..themes[themeIndex].name
  elseif k==keys.a and w.id=="users" then startInput("Nombre de cuenta","Nuevo usuario",true)
  elseif k==keys.m and w.id=="players" then startInput("Mensaje para Chat Box","",true)
  elseif k==keys.r and w.id=="system" then w.data.refresh=os.clock()
@@ -643,6 +709,16 @@ local function char(c)
  elseif active and active.id=="ide" then ide.char(active.data.ide,c)
  end
 end
+local preferredDisplay=nil
+if fs.exists(monitorSetting) then
+ local file=fs.open(monitorSetting,"r")
+ if file then preferredDisplay=file.readAll():gsub("%s+$","");file.close() end
+end
+if not preferredDisplay or preferredDisplay=="" then
+ local available=listExternalMonitors()
+ preferredDisplay=available[1] and available[1].name or "terminal"
+end
+applyDisplay(preferredDisplay,false)
 boot()
 while not logged do if login() then logged=true end end
 createDevices=ap.create()
@@ -653,9 +729,17 @@ while true do
  if not logged then login();logged=true;redraw() end
  local ev={os.pullEvent()}
  if ev[1]=="term_resize" then redraw()
+ elseif ev[1]=="monitor_resize" then
+  if ev[2]==selectedDisplay then W,H=term.getSize();renderSurface=nil;redraw() end
+ elseif ev[1]=="monitor_touch" then
+  if ev[2]==selectedDisplay then click(ev[3],ev[4]);redraw() end
+ elseif ev[1]=="peripheral_detach" then
+  if ev[2]==selectedDisplay then applyDisplay("terminal",true);status="Monitor desconectado; usando terminal CraftOS" end
+  redraw()
+ elseif ev[1]=="peripheral" then redraw()
  elseif ev[1]=="mouse_click" then click(ev[3],ev[4]);redraw()
  elseif ev[1]=="mouse_drag" then dragWindow(ev[3],ev[4]);redraw()
- elseif ev[1]=="mouse_up" then if active then active.drag=nil end
+ elseif ev[1]=="mouse_up" then if active then active.drag=nil;active.resize=nil end
  elseif ev[1]=="key" then key(ev[2]);redraw()
  elseif ev[1]=="char" then char(ev[2]);redraw()
  elseif ev[1]=="timer" and ev[2]==clockTimer then
