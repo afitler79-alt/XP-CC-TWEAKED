@@ -144,11 +144,6 @@ local paintColors={C.black,C.red,C.green,C.blue,C.orange,C.purple}
 local desktopRows,desktopColumns,desktopPage=4,3,0
 local userFile="/.xpultimate/users"
 local function clipped(s,n) s=tostring(s or ""); if #s>n then return s:sub(1,math.max(1,n-3)).."..." end; return s end
-local function currentShellDir()
- if shell and type(shell.dir)=="function" then local ok,value=pcall(shell.dir);if ok and type(value)=="string" then return fs.combine("/",value) end end
- if shell and type(shell.getRunningProgram)=="function" then local ok,value=pcall(shell.getRunningProgram);if ok and type(value)=="string" then return fs.getDir(value) end end
- return "/"
-end
 local function appendWrapped(lines,text,width)
  width=math.max(8,width)
  for paragraph in tostring(text or ""):gmatch("[^\n]+") do
@@ -235,7 +230,8 @@ local function open(id)
  for _,w in ipairs(windows) do if w.id==id then w.min=false;active=w;return end end
  local name=id;for _,a in ipairs(apps) do if a.id==id then name=a.name end end
  local ww=math.max(1,math.min(W-2,math.max(24,math.floor(W*.74))))
- local hh=math.max(4,math.min(math.max(4,H-4),math.max(10,H-5)))
+ -- Reserve the last two rows for the XP status strip and taskbar.
+ local hh=math.max(4,math.min(math.max(4,H-3),math.max(10,H-5)))
  local offset=(#windows%4)*2
  local w={id=id,name=name,x=math.max(1,math.min(math.floor((W-ww)/2)+1+offset,W-ww+1)),y=math.max(1,math.min(2+offset,H-hh-2)),w=ww,h=hh,min=false,max=false,scroll=0,data={}}
  windows[#windows+1]=w;active=w
@@ -323,11 +319,13 @@ end
 local function drawWindow(w)
  if w.min then return end
  local x,y,ww,hh=w.x,w.y,w.w,w.h
- box(x+1,y+hh,ww,1,C.black);box(x+ww,y+1,1,hh,C.gray)
+ -- Shadows are kept inside the desktop; they must never paint over the status strip.
+ if y+hh < H-2 then box(x+1,y+hh,ww,1,C.black) end
+ if x+ww<=W and y+1<=H-3 then box(x+ww,y+1,1,math.max(0,math.min(hh,H-3-y)),C.gray) end
  box(x,y,ww,hh,C.gray);box(x+1,y+1,ww-2,hh-2,C.white);box(x+1,y,ww-2,1,C.blue)
  put(x+2,y," "..clipped(w.name,math.max(1,ww-18)),C.white,C.blue)
  put(x+ww-13,y,"[_]",C.white,C.lightBlue);put(x+ww-9,y,"[+]",C.white,C.lightBlue);put(x+ww-5,y,"[X]",C.white,C.red)
- local y0=y+2;local bottom=math.min(H-2,y+hh-2)
+ local y0=y+2;local bottom=math.min(H-3,y+hh-2)
  local lines=appLines(w);local max=math.max(0,#lines-(bottom-y0+1));w.scroll=math.max(0,math.min(w.scroll,max))
  if w.id=="studio" then
   local visible=bottom-y0+1;local selectedLine=(w.data.project.selected or 1)+6
@@ -374,6 +372,14 @@ local function drawWindow(w)
 end
 local function redraw()
  W,H=term.getSize();createDevices=ap.create();createAlert=false
+ local maxH=math.max(4,H-3)
+ for _,w in ipairs(windows) do
+  if w.max then w.x=1;w.y=1;w.w=W;w.h=maxH
+  else
+   w.w=math.max(1,math.min(w.w,W));w.h=math.max(4,math.min(w.h,maxH))
+   w.x=math.max(1,math.min(w.x,W-w.w+1));w.y=math.max(1,math.min(w.y,math.max(1,H-w.h-2)))
+  end
+ end
  for _,d in ipairs(createDevices) do for side,value in pairs(d.stress) do local cap=d.capacity[side];if cap and cap>0 and value>=cap then createAlert=true end end end
  term.setBackgroundColor(wallpaper);term.clear()
  -- Cielo Luna con sol, nubes y pradera.
@@ -442,8 +448,8 @@ local function submitInput()
  elseif active.id=="cmd" then
   d.lines[#d.lines+1]="> "..value
   if value=="clear" then d.lines={}
-  elseif value=="pwd" then d.lines[#d.lines+1]=currentShellDir()
-  elseif value=="ls" then for _,v in ipairs(fs.list(currentShellDir())) do d.lines[#d.lines+1]=v end
+  elseif value=="pwd" then d.lines[#d.lines+1]=shell.dir()
+  elseif value=="ls" then for _,v in ipairs(fs.list(shell.dir())) do d.lines[#d.lines+1]=v end
   elseif value=="help" then d.lines[#d.lines+1]="Usa comandos de CraftOS (shell.run); cuidado con scripts externos."
   elseif value=="shutdown" then playSound("shutdown");os.shutdown()
   elseif value=="reboot" then os.reboot()
@@ -484,7 +490,7 @@ local function click(x,y)
   active=w
   if i<#windows then table.remove(windows,i);windows[#windows+1]=w end
   if y==w.y then if x>=w.x+w.w-4 then playSound("close");for j,v in ipairs(windows) do if v==w then table.remove(windows,j);break end end;active=windows[#windows]
-    elseif x>=w.x+w.w-7 and x<=w.x+w.w-6 then w.max=not w.max;if w.max then w.old={w.x,w.y,w.w,w.h};w.x=1;w.y=1;w.w=W;w.h=H-2 else w.x,w.y,w.w,w.h=unpack(w.old) end
+    elseif x>=w.x+w.w-7 and x<=w.x+w.w-6 then w.max=not w.max;if w.max then w.old={w.x,w.y,w.w,w.h};w.x=1;w.y=1;w.w=W;w.h=math.max(4,H-3) else w.x,w.y,w.w,w.h=unpack(w.old) end
     elseif x>=w.x+w.w-11 and x<=w.x+w.w-10 then w.min=true
     else w.drag={x-w.x,y-w.y} end;return end
   local row=y-w.y-2+w.scroll
@@ -519,7 +525,7 @@ end
 local function dragWindow(x,y)
  if not active or not active.drag then return end
  active.x=math.max(1,math.min(W-active.w+1,x-active.drag[1]))
- active.y=math.max(1,math.min(H-active.h,y-active.drag[2]))
+ active.y=math.max(1,math.min(math.max(1,H-active.h-2),y-active.drag[2]))
 end
 local function key(k)
  playSound("click")
