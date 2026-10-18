@@ -190,12 +190,25 @@ local redirectedMethods={"write","blit","clear","clearLine","getCursorPos","setC
  "getPaletteColor","setPaletteColor"}
 local function redirectWindow(target,fallback)
  local proxy={}
- for _,method in ipairs(redirectedMethods) do
+ local methods={}
+ for _,method in ipairs(redirectedMethods) do methods[method]=true end
+ -- CraftOS-PC extends Redirect with native methods such as isColor and
+ -- graphics operations. term.redirect validates every native method, so
+ -- expose the full native API and delegate unsupported buffer calls safely.
+ local native=term.native and term.native()
+ if type(native)=="table" then
+  for method,fn in pairs(native) do
+   if type(method)=="string" and type(fn)=="function" then methods[method]=true end
+  end
+ end
+ for method in pairs(methods) do
   local name=method
   proxy[name]=function(...)
    local fn=target[name]
    if type(fn)=="function" then return fn(...) end
    fn=fallback and fallback[name]
+   if type(fn)=="function" then return fn(...) end
+   fn=native and native[name]
    if type(fn)=="function" then return fn(...) end
   end
  end
