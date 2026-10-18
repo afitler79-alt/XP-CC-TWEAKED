@@ -185,6 +185,22 @@ mirrorTerminal.isColor=function()
  end
  return color
 end
+local redirectedMethods={"write","blit","clear","clearLine","getCursorPos","setCursorPos","getSize","scroll",
+ "getTextColor","setTextColor","getBackgroundColor","setBackgroundColor","isColor","getCursorBlink","setCursorBlink",
+ "getPaletteColor","setPaletteColor"}
+local function redirectWindow(target,fallback)
+ local proxy={}
+ for _,method in ipairs(redirectedMethods) do
+  local name=method
+  proxy[name]=function(...)
+   local fn=target[name]
+   if type(fn)=="function" then return fn(...) end
+   fn=fallback and fallback[name]
+   if type(fn)=="function" then return fn(...) end
+  end
+ end
+ return proxy
+end
 local function listExternalMonitors()
  local result={}
  if not peripheral or type(peripheral.getNames)~="function" then return result end
@@ -497,17 +513,9 @@ local function redraw()
  if not renderSurface or renderParent~=parent or renderWidth~=W or renderHeight~=H then
   renderParent=parent;renderWidth=W;renderHeight=H
   renderSurface=window.create(parent,1,1,W,H,false)
-  -- Some ComputerCraft window terminals omit this method, but term.redirect
-  -- requires the complete terminal interface before accepting the buffer.
-  if type(renderSurface.isColor)~="function" then
-   renderSurface.isColor=function()
-    if type(parent.isColor)=="function" then return parent.isColor() end
-    return false
-   end
-  end
  end
  renderSurface.setVisible(false)
- local previousTerm=term.redirect(renderSurface)
+ local previousTerm=term.redirect(redirectWindow(renderSurface,parent))
  createAlert=false
  local maxH=math.max(4,H-3)
  for _,w in ipairs(windows) do
@@ -609,7 +617,7 @@ local function submitInput()
   elseif value=="reboot" then os.reboot()
   elseif value~="" then
    local capture=window.create(term.current(),1,1,W,H,false)
-   local previous=term.redirect(capture)
+   local previous=term.redirect(redirectWindow(capture,term.current()))
    local ok,err=pcall(shell.run,value)
    term.redirect(previous)
    if not ok then d.lines[#d.lines+1]=tostring(err) else
@@ -721,7 +729,7 @@ local function key(k)
  if w.id=="ide" then
   local action=ide.key(w.data.ide,k)
   if action=="newFile" then startInput("Nombre de archivo (ej. hola.lua)","");inputMode="ide-new"
-  elseif action=="run" then local ok,msg=ide.run(w.data.ide);status=msg or (ok and "Ejecucion terminada" or "Error al ejecutar")
+  elseif action=="run" then local ok,msg=ide.run(w.data.ide,redirectWindow);status=msg or (ok and "Ejecucion terminada" or "Error al ejecutar")
   elseif action=="find" then startInput("Buscar","");inputMode="ide-find"
   elseif action=="replace" then startInput("Buscar texto","");inputMode="ide-replace-search"
   elseif action and action~="redraw" then status=tostring(action) end
@@ -730,7 +738,7 @@ local function key(k)
  if w.id=="packages" then
   local action=packages.key(w.data.packages,k)
   if type(action)=="string" and action~="redraw" then
-   local output=window.create(term.current(),1,1,W,H,false);local previous=term.redirect(output)
+   local output=window.create(term.current(),1,1,W,H,false);local previous=term.redirect(redirectWindow(output,term.current()))
    local callOk,result=pcall(shell.run,action);term.redirect(previous)
    local _,height=output.getSize();w.data.packages.output={}
    for row=1,height do local line=output.getLine(row):gsub("%s+$","");if line~="" then w.data.packages.output[#w.data.packages.output+1]=line end end
@@ -1809,11 +1817,12 @@ function M.replaceAll(state,needle,replacement)
  state.status="Reemplazos: "..count;return count,state.status
 end
 function M.cursor(state) return state.x,state.y end
-function M.run(state)
+function M.run(state,redirectWindow)
  if not state.path then return false,"Abre un programa primero" end
  local ok,err=M.save(state);if not ok then return false,err end
  local sw,sh=term.getSize();local w=window.create(term.current(),1,1,sw,sh,false)
- local previous=term.redirect(w);local callOk,result=pcall(shell.run,state.path);term.redirect(previous)
+ local output=type(redirectWindow)=="function" and redirectWindow(w,term.current()) or w
+ local previous=term.redirect(output);local callOk,result=pcall(shell.run,state.path);term.redirect(previous)
  local success=callOk and result~=false
  state.output={}
  local _,height=w.getSize()
