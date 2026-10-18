@@ -400,18 +400,14 @@ local function login()
    local width=math.min(W-8,28);local x=math.floor((W-width)/2)+1
    box(x,y,width,1,bg);put(x+2,y,(i==1 and "> " or "  ")..tostring(u.name or "Usuario"),C.white,bg);put(x+width-4,y,"["..i.."]",C.yellow,bg)
   end
-  center(H-2,"ENTER inicia | Pulsa el numero de cuenta",C.white,loginBar)
-  local event,value=os.pullEventRaw()
-  -- Algunos entornos móviles/embebidos envían los números como `char`
-  -- en vez de generar un evento `key`. Aceptamos ambos para que el número
-  -- no termine en la shell como si fuera el nombre de un programa.
+  center(H-2,"Escribe el numero y pulsa ENTER",C.white,loginBar)
+  term.setCursorPos(2,H-1);term.setTextColor(C.white);term.setBackgroundColor(C.black);term.write("> ")
+  local input=read() or ""
+  input=input:gsub("^%s+",""):gsub("%s+$","")
   local selected=nil
-  if event=="char" then
-   local number=tonumber(value)
+  if input=="" then selected=1 else
+   local number=tonumber(input)
    if number and number>=1 and number<=#users then selected=number end
-  elseif event=="key" then
-   if value>=keys.one and value<=keys.nine then selected=value-keys.one+1
-   elseif value==keys.enter then selected=1 end
   end
   if selected then
    local u=users[selected]
@@ -615,7 +611,7 @@ local function redraw()
   for y=horizon,H-2 do box(1,y,W,y%2==0 and C.lime or C.green) end
   for x=4,W,9 do box(x,horizon-1,2,2,C.green) end
  else
-  -- Fondo XP clásico.
+  -- Fondo XP clÃ¡sico.
   box(1,1,W,H,wallpaper)
   put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
   put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
@@ -987,7 +983,7 @@ end
 return M
 ]=]
 payload["/drivers/peripherals.lua"] = [=[
--- XP Ultimate CC: deteccion segura de perifÃ©ricos (nombres legacy y actuales).
+-- XP Ultimate CC: deteccion segura de perifÃƒÂ©ricos (nombres legacy y actuales).
 local M = {}
 local aliases = {
   player = {"player_detector", "playerDetector"},
@@ -1103,7 +1099,7 @@ end
 
 function M.setSpeed(name, side, speed)
   local p = peripheral.wrap(name)
-  if not p then return false, "PerifÃ©rico desconectado" end
+  if not p then return false, "PerifÃƒÂ©rico desconectado" end
   speed = math.max(-256, math.min(256, math.floor(tonumber(speed) or 0)))
   if type(p.setTargetSpeed) == "function" then
     local ok, err = pcall(p.setTargetSpeed, side, speed)
@@ -2063,3 +2059,4 @@ print("")
 print("Windows XP Ultimate CC instalado.")
 print("Autostart: abre /startup.lua para elegir; la preferencia actual se conserva.")
 print("Reinicia o ejecuta startup para continuar.")
+
