@@ -82,6 +82,7 @@ local apps={
  {id="settings",name="Ajustes XP",icon="[OPT]"},{id="taskmgr",name="Administrador de tareas",icon="[TASK]"},
  {id="clock",name="Cronometro",icon="[TIME]"},
  {id="games",name="Juegos XP",icon="[GAME]"},
+ {id="youtube",name="XP YouTube",icon="[YT]"},
  {id="tools",name="Centro de herramientas",icon="[TOOLS]"},
  {id="ide",name="XP Visual Lua Studio",icon="[IDE]"},
  {id="packages",name="Gestor de paquetes",icon="[PKG]"},
@@ -118,6 +119,7 @@ local audio=dofile("/apps/audio.lua")
 local calculator=dofile("/apps/calculator.lua")
 local studio=dofile("/apps/studio.lua")
 local games=dofile("/apps/games.lua")
+local youtube=dofile("/apps/youtube.lua")
 local tools=dofile("/apps/tools.lua")
 local ide=dofile("/apps/ide.lua")
 local packages=dofile("/apps/packages.lua")
@@ -132,6 +134,57 @@ local themeIndex=1
 local settingsPath="/.xpultimate/settings"
 local monitorSetting="/.xpultimate/monitor"
 local selectedDisplay="terminal"
+local activeMonitor=nil
+local outputTargets={baseTerminal}
+local mirrorTerminal={}
+local function refreshOutputTargets()
+ outputTargets={baseTerminal}
+ if activeMonitor then outputTargets[#outputTargets+1]=activeMonitor end
+end
+local function readSize(target)
+ local ok,width,height=pcall(target.getSize)
+ if ok then return tonumber(width) or 1,tonumber(height) or 1 end
+ return 1,1
+end
+local function forward(method,...)
+ local firstResult
+ for index,target in ipairs(outputTargets) do
+  local fn=target[method]
+  if type(fn)=="function" then
+   local ok,a,b,c=pcall(fn,...)
+   if index==1 and ok then firstResult={a,b,c} end
+  end
+ end
+ if firstResult then return firstResult[1],firstResult[2],firstResult[3] end
+end
+for _,method in ipairs({"write","blit","clear","clearLine","scroll","setCursorPos","setTextColor","setBackgroundColor","setCursorBlink","setPaletteColor"}) do
+ local name=method
+ mirrorTerminal[name]=function(...) return forward(name,...) end
+end
+mirrorTerminal.getSize=function()
+ local width,height=readSize(baseTerminal)
+ if activeMonitor then local mw,mh=readSize(activeMonitor);width=math.min(width,mw);height=math.min(height,mh) end
+ W,H=width,height
+ return width,height
+end
+for _,method in ipairs({"getCursorPos","getTextColor","getBackgroundColor","getCursorBlink","getPaletteColor"}) do
+ local name=method
+ mirrorTerminal[name]=function(...)
+  local fn=baseTerminal[name]
+  if type(fn)=="function" then return fn(...) end
+ end
+end
+mirrorTerminal.isColor=function()
+ local fn=baseTerminal.isColor
+ local ok,color=false,false
+ if type(fn)=="function" then ok,color=pcall(fn) end
+ color=ok and color or false
+ if activeMonitor and type(activeMonitor.isColor)=="function" then
+  local monitorOk,monitorColor=pcall(activeMonitor.isColor)
+  color=color and monitorOk and monitorColor
+ end
+ return color
+end
 local function listExternalMonitors()
  local result={}
  if not peripheral or type(peripheral.getNames)~="function" then return result end
@@ -149,7 +202,7 @@ local function listExternalMonitors()
  return result
 end
 local function applyDisplay(name,persist)
- local output=baseTerminal
+ local output=nil
  if name~="terminal" then
   for _,entry in ipairs(listExternalMonitors()) do
    if entry.name==name then
@@ -158,13 +211,17 @@ local function applyDisplay(name,persist)
     break
    end
   end
-  if output==baseTerminal then name="terminal" end
+  if not output then name="terminal" end
  end
- local ok,err=pcall(term.redirect,output)
- if not ok then output=baseTerminal;name="terminal";pcall(term.redirect,output);status="No se pudo activar la pantalla: "..tostring(err) end
+ activeMonitor=output
+ refreshOutputTargets()
  selectedDisplay=name
- W,H=term.getSize()
+ W,H=mirrorTerminal.getSize()
  renderSurface=nil;renderParent=nil;renderWidth=0;renderHeight=0
+ for _,target in ipairs(outputTargets) do
+  pcall(target.setBackgroundColor,wallpaper)
+  pcall(target.clear)
+ end
  if persist then
   if not fs.exists("/.xpultimate") then fs.makeDir("/.xpultimate") end
   local file=fs.open(monitorSetting,"w")
@@ -306,6 +363,7 @@ local function open(id)
  elseif id=="taskmgr" then w.data.selected=1
  elseif id=="clock" then w.data.elapsed=0;w.data.running=false;w.data.started=0
  elseif id=="games" then w.data.game=games.new()
+ elseif id=="youtube" then w.data.youtube=youtube.new()
  elseif id=="tools" then w.data.tools=tools.new()
  elseif id=="ide" then w.data.ide=ide.new()
  elseif id=="packages" then w.data.packages=packages.new()
@@ -339,7 +397,7 @@ local function appLines(w)
  elseif w.id=="control" then lines={"Panel de control","[U] Administrar usuarios","[L] Cerrar sesion","[A] Autostart: "..(getAutoStart() and "ACTIVADO" or "DESACTIVADO"),"HTTP API: "..tostring(http and http.get~=nil)}
  elseif w.id=="settings" then
   local monitorCount=#listExternalMonitors()
-  lines={"Ajustes de Windows XP Ultimate","Flechas: elegir tema | ENTER: aplicar","S: sonidos - "..(soundEnabled and "ACTIVADOS" or "DESACTIVADOS"),"M: cambiar pantalla de salida","Pantalla actual: "..(selectedDisplay=="terminal" and "CraftOS" or selectedDisplay),"Monitores externos: "..monitorCount,"Temas disponibles:"}
+  lines={"Ajustes de Windows XP Ultimate","Flechas: elegir tema | ENTER: aplicar","S: sonidos - "..(soundEnabled and "ACTIVADOS" or "DESACTIVADOS"),"M: cambiar monitor duplicado","Computer: siempre activo","Monitor: "..(selectedDisplay=="terminal" and "sin duplicar" or selectedDisplay),"Monitores detectados: "..monitorCount,"Temas disponibles:"}
   for i,t in ipairs(themes) do lines[#lines+1]=(i==w.data.theme and "> " or "  ")..i..". "..t.name end
  elseif w.id=="taskmgr" then
   lines={"Administrador de tareas","Flechas: seleccionar | ENTER: activar","X: cerrar ventana seleccionada",""};w.data.targets={}
@@ -352,6 +410,7 @@ local function appLines(w)
   local elapsed=w.data.elapsed or 0;if w.data.running then elapsed=elapsed+math.max(0,os.clock()-w.data.started) end
   lines={"Cronometro XP","",string.format("%02d:%02d.%02d",math.floor(elapsed/60),math.floor(elapsed)%60,math.floor(elapsed*100)%100),"","SPACE: iniciar/pausar","R: reiniciar"}
  elseif w.id=="games" then lines=games.lines(d.game)
+ elseif w.id=="youtube" then lines=youtube.lines(d.youtube)
  elseif w.id=="tools" then lines=tools.lines(d.tools)
  elseif w.id=="ide" then lines=ide.lines(d.ide)
  elseif w.id=="packages" then lines=packages.lines(d.packages)
@@ -422,6 +481,13 @@ local function drawWindow(w)
     local enabled=track.pattern[offset+step]
     put(x+9+step-1,i,enabled and "#" or ".",enabled and C.white or C.gray,enabled and color or C.white)
    end
+  elseif w.id=="youtube" and w.data.youtube.playing and lineIndex>=3 and lineIndex<=10 then
+   local pixels=youtube.pixelRows(w.data.youtube)
+   local pixelRow=pixels and pixels[lineIndex-2]
+   if pixelRow then
+    pcall(term.setCursorPos,x+2,i)
+    if type(term.blit)=="function" then pcall(term.blit,pixelRow[1],pixelRow[2],pixelRow[3]) end
+   end
   elseif row then put(x+2,i,row,C.black,C.white) end
  end
 end
@@ -477,7 +543,19 @@ local function redraw()
  end
  if inputMode then box(2,H-3,W-4,2,C.black);put(3,H-3,inputMode..": "..inputText,C.white,C.black) end
  term.redirect(previousTerm)
- renderSurface.setVisible(true)
+ -- Force the completed frame onto monitors. Some monitor implementations do
+ -- not repaint reliably when an invisible window is made visible again.
+ for row=1,H do
+  local line,fg,bg=renderSurface.getLine(row)
+  if line and fg and bg then
+   pcall(parent.setCursorPos,1,row)
+   if type(parent.blit)=="function" then pcall(parent.blit,line,fg,bg)
+   else
+    pcall(parent.setTextColor,C.white);pcall(parent.setBackgroundColor,wallpaper)
+    pcall(parent.write,line)
+   end
+  end
+ end
 end
 local function startInput(mode,initial,suppressChar) inputMode=mode;inputText=initial or "";suppressNextChar=suppressChar==true end
 local function submitInput()
@@ -493,6 +571,9 @@ local function submitInput()
  end
  if active and active.id=="tools" and mode=="tool-task" then
   local ok,err=tools.addTask(active.data.tools,value);status=ok and "Tarea guardada" or tostring(err);return
+ end
+ if active and active.id=="youtube" and mode=="youtube-search" then
+  youtube.search(active.data.youtube,value);return
  end
  if active and active.id=="ide" and mode=="ide-new" then
   local ok,err=ide.newFile(active.data.ide,value);status=ok and "Programa creado" or tostring(err);return
@@ -564,7 +645,7 @@ local function click(x,y)
   local row=y-w.y-2+w.scroll
   if w.id=="settings" then
    local choice=y-(w.y+5)+w.scroll
-  choice=choice-3
+  choice=choice-4
   if choice>=1 and choice<=#themes then w.data.theme=choice;themeIndex=choice;wallpaper=themes[choice].wall;accentColor=themes[choice].accent;saveSettings();status="Tema aplicado: "..themes[choice].name;return end
   elseif w.id=="taskmgr" then
    local choice=y-(w.y+5)+w.scroll
@@ -620,6 +701,15 @@ local function key(k)
  if not active then return end
  local w=active
  if w.id=="games" then games.key(w.data.game,k);return end
+ if w.id=="youtube" then
+  local action=youtube.key(w.data.youtube,k,keys)
+  if action=="search" then startInput("Buscar en YouTube",w.data.youtube.query,true);inputMode="youtube-search"
+  elseif action=="search-play" then
+   if #w.data.youtube.videos==0 then startInput("Buscar en YouTube",w.data.youtube.query,true);inputMode="youtube-search"
+   else youtube.play(w.data.youtube) end
+  end
+  return
+ end
  if w.id=="ide" then
   local action=ide.key(w.data.ide,k)
   if action=="newFile" then startInput("Nombre de archivo (ej. hola.lua)","");inputMode="ide-new"
@@ -719,11 +809,13 @@ if not preferredDisplay or preferredDisplay=="" then
  preferredDisplay=available[1] and available[1].name or "terminal"
 end
 applyDisplay(preferredDisplay,false)
+term.redirect(mirrorTerminal)
 boot()
 while not logged do if login() then logged=true end end
 createDevices=ap.create()
 redraw()
 local clockTimer=os.startTimer(1)
+local videoTimer=os.startTimer(0.34)
 local peripheralTimer=os.startTimer(5)
 while true do
  if not logged then login();logged=true;redraw() end
@@ -736,7 +828,12 @@ while true do
  elseif ev[1]=="peripheral_detach" then
   if ev[2]==selectedDisplay then applyDisplay("terminal",true);status="Monitor desconectado; usando terminal CraftOS" end
   redraw()
- elseif ev[1]=="peripheral" then redraw()
+ elseif ev[1]=="peripheral" then
+  if selectedDisplay=="terminal" then
+   local available=listExternalMonitors()
+   if available[1] then applyDisplay(available[1].name,true);status="Monitor duplicado: "..selectedDisplay end
+  end
+  redraw()
  elseif ev[1]=="mouse_click" then click(ev[3],ev[4]);redraw()
  elseif ev[1]=="mouse_drag" then dragWindow(ev[3],ev[4]);redraw()
  elseif ev[1]=="mouse_up" then if active then active.drag=nil;active.resize=nil end
@@ -745,6 +842,13 @@ while true do
  elseif ev[1]=="timer" and ev[2]==clockTimer then
   for _,w in ipairs(windows) do if w.id=="games" then games.update(w.data.game) end end
   redraw();clockTimer=os.startTimer(1)
+ elseif ev[1]=="timer" and ev[2]==videoTimer then
+  local changed=false
+  for _,w in ipairs(windows) do
+   if w.id=="youtube" and youtube.poll(w.data.youtube) then changed=true end
+  end
+  if changed then redraw() end
+  videoTimer=os.startTimer(0.34)
  elseif ev[1]=="timer" and ev[2]==peripheralTimer then
   createDevices=ap.create();redraw();peripheralTimer=os.startTimer(5)
  end
@@ -905,6 +1009,152 @@ function M.setSpeed(name, side, speed)
     return false, tostring(err)
   end
   return false, "Este dispositivo no permite ajustar velocidad"
+end
+
+return M
+]=]
+payload["/apps/youtube.lua"] = [=[
+-- Cliente para la pasarela local youtube_bridge.py (CraftOS-PC).
+-- En CC:Tweaked sin Graphics Mode se conserva la interfaz de lista y estado.
+local M = {}
+local BASE = "http://127.0.0.1:8765"
+
+local function encode(value)
+  return (tostring(value or ""):gsub("([^%w%-_%.~])", function(char)
+    return string.format("%%%02X", string.byte(char))
+  end))
+end
+
+local function request(path, binary)
+  if not http or type(http.get) ~= "function" then
+    return nil, "La API HTTP de CraftOS esta desactivada."
+  end
+  local ok, response, err = pcall(http.get, BASE .. path, nil, binary == true)
+  if not ok then return nil, tostring(response) end
+  if not response then return nil, tostring(err or "No hay respuesta del servicio local.") end
+  local readOk, body = pcall(response.readAll)
+  pcall(response.close)
+  if not readOk then return nil, tostring(body) end
+  return body
+end
+
+local function json(path)
+  local body, err = request(path)
+  if not body then return nil, err end
+  local ok, value = pcall(textutils.unserializeJSON, body)
+  if not ok or type(value) ~= "table" then return nil, "Respuesta invalida de youtube_bridge.py." end
+  if value.error then return nil, tostring(value.error) end
+  return value
+end
+
+function M.new()
+  return {query="", videos={}, selected=1, title="", playing=false,
+    frame=nil, frameAt=0, status="Inicia youtube_bridge.py en el PC y pulsa R.",
+    graphics=type(term.setGraphicsMode)=="function" and type(term.drawPixels)=="function"}
+end
+
+function M.search(state, query)
+  query = tostring(query or state.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if query == "" then state.status="Escribe una busqueda primero.";return false end
+  state.query=query
+  local result,err=json("/search?q="..encode(query))
+  if not result then state.status="Busqueda no disponible: "..tostring(err);return false end
+  state.videos={};for i=1,math.min(5,#(result.videos or {})) do state.videos[i]=result.videos[i] end
+  state.selected=1;state.status="Resultados: "..#state.videos
+  if #state.videos==0 then state.status="No se encontraron videos." end
+  return true
+end
+
+function M.play(state)
+  local video=state.videos[state.selected]
+  if not video then state.status="Selecciona un video de la lista.";return false end
+  local result,err=json("/play?id="..encode(video.id))
+  if not result then state.status="No se pudo reproducir: "..tostring(err);return false end
+  state.title=video.title or "YouTube"
+  state.playing=true;state.frame=nil;state.frameAt=0;state.status="Reproduciendo: "..state.title
+  return true
+end
+
+function M.stop(state)
+  local result,err=json("/stop")
+  state.playing=false;state.frame=nil
+  state.status=result and "Reproduccion detenida." or ("No se pudo detener: "..tostring(err))
+end
+
+function M.poll(state)
+  if not state.playing or os.clock()-state.frameAt<0.35 then return false end
+  state.frameAt=os.clock()
+  local frame,err=request("/frame",true)
+  if frame and #frame==32*8*3 then state.frame=frame
+  elseif err then state.status="Perdi la conexion con la pasarela: "..tostring(err);state.playing=false end
+  return true
+end
+
+function M.lines(state)
+  local lines={"XP YouTube | video por pixeles y audio del PC",
+    "Estado: "..tostring(state.status)}
+  if state.playing then
+    for _=1,8 do lines[#lines+1]="" end
+    lines[#lines+1]="Ahora: "..tostring(state.title)
+    lines[#lines+1]="X detener | R buscar otro video"
+    return lines
+  end
+  lines[#lines+1]="R buscar | Flechas elegir | ENTER reproducir | X detener"
+  lines[#lines+1]=""
+  if #state.videos==0 then
+    lines[#lines+1]="Sin resultados cargados. Pulsa R y escribe una busqueda."
+    lines[#lines+1]="Servicio requerido: youtube_bridge.py en el PC."
+  else
+    for i=1,math.min(#state.videos,5) do
+      local video=state.videos[i]
+      lines[#lines+1]=(i==state.selected and "> " or "  ")..i..". "..tostring(video.title or "Video")
+    end
+  end
+  lines[#lines+1]=""
+  lines[#lines+1]=state.playing and ("Ahora: "..tostring(state.title)) or ""
+  lines[#lines+1]="CraftOS-PC: video por pixeles | Minecraft: controles sin video."
+  return lines
+end
+
+function M.pixelRows(state)
+  if not state.frame then return nil end
+  -- Un espacio coloreado por celda funciona incluso en terminales CC sin Unicode.
+  -- El orden es el de los bits de colores de CC:Tweaked; toBlit da el codigo exacto.
+  local rgb={
+    {240,240,240},{242,178,51},{229,127,216},{153,178,242},{222,222,108},{127,204,25},{242,178,204},{76,76,76},
+    {153,153,153},{76,153,178},{178,102,229},{51,102,204},{127,102,51},{87,166,78},{204,76,76},{17,17,17}
+  }
+  local blit={}
+  local ccColors={colors.white,colors.orange,colors.magenta,colors.lightBlue,colors.yellow,colors.lime,colors.pink,colors.gray,
+    colors.lightGray,colors.cyan,colors.purple,colors.blue,colors.brown,colors.green,colors.red,colors.black}
+  for i,color in ipairs(ccColors) do blit[i]=colors.toBlit(color) end
+  local function nearest(r,g,b)
+    local best,bestD=1,math.huge
+    for i,p in ipairs(rgb) do local dr,dg,db=r-p[1],g-p[2],b-p[3];local d=dr*dr+dg*dg+db*db
+      if d<bestD then best,bestD=i,d end
+    end
+    return best
+  end
+  local rows={}
+  for y=0,7 do
+    local chars,fg,bg={},{},{}
+    for x=0,31 do
+      local pixel=(y*32+x)*3+1
+      local color=blit[nearest(state.frame:byte(pixel) or 0,state.frame:byte(pixel+1) or 0,state.frame:byte(pixel+2) or 0)]
+      chars[#chars+1]=" ";fg[#fg+1]=color;bg[#bg+1]=color
+    end
+    rows[y+1]={table.concat(chars),table.concat(fg),table.concat(bg)}
+  end
+  return rows
+end
+
+function M.key(state,key,keys)
+  if key==keys.up then state.selected=math.max(1,state.selected-1)
+  elseif key==keys.down then state.selected=math.min(#state.videos,state.selected+1)
+  elseif key==keys.enter then return "search-play"
+  elseif key==keys.r then return "search"
+  elseif key==keys.x then M.stop(state);return "redraw" end
+  return "redraw"
 end
 
 return M
