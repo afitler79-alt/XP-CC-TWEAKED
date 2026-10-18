@@ -334,8 +334,26 @@ local function matchingApps()
 end
 local function loadUsers()
  local out={}
- if fs.exists(userFile) then local f=fs.open(userFile,"r"); local ok,t=pcall(textutils.unserialize,f.readAll());f.close();if ok and type(t)=="table" then out=t end end
- if #out==0 then out={{name="Usuario",pin=""}};fs.makeDir("/.xpultimate");local f=fs.open(userFile,"w");f.write(textutils.serialize(out));f.close() end
+ if fs.exists(userFile) then
+  local f=fs.open(userFile,"r")
+  if f then
+   local raw=f.readAll() or "";f.close()
+   local ok,t=pcall(textutils.unserialize,raw)
+   if ok and type(t)=="table" then
+    for _,candidate in ipairs(t) do
+     if type(candidate)=="table" and tostring(candidate.name or "")~="" then
+      out[#out+1]={name=tostring(candidate.name):sub(1,24),pin=type(candidate.pin)=="string" and candidate.pin or ""}
+     end
+    end
+   end
+  end
+ end
+ if #out==0 then
+  out={{name="Usuario",pin=""}}
+  if not fs.exists("/.xpultimate") then fs.makeDir("/.xpultimate") end
+  local f=fs.open(userFile,"w")
+  if f then f.write(textutils.serialize(out));f.close() end
+ end
  return out
 end
 local users=loadUsers()
@@ -377,12 +395,12 @@ local function login()
   for i,u in ipairs(users) do
    local y=8+i;local bg=i==1 and C.lightBlue or C.blue
    local width=math.min(W-8,28);local x=math.floor((W-width)/2)+1
-   box(x,y,width,1,bg);put(x+2,y,(i==1 and "> " or "  ")..u.name,C.white,bg);put(x+width-4,y,"["..i.."]",C.yellow,bg)
+   box(x,y,width,1,bg);put(x+2,y,(i==1 and "> " or "  ")..tostring(u.name or "Usuario"),C.white,bg);put(x+width-4,y,"["..i.."]",C.yellow,bg)
   end
   center(H-2,"ENTER inicia | Pulsa el numero de cuenta",C.white,C.blue)
   local e,k=os.pullEvent("key")
   if k>=keys.one and k<=keys.nine then local u=users[k-keys.one+1];if u then username=u.name; if u.pin=="" then return true end;term.setCursorPos(2,H-1);term.write("PIN: ");local pin=read();if pin==u.pin then return true end end
-  elseif k==keys.enter then username=users[1].name;return true end
+  elseif k==keys.enter then username=tostring(users[1] and users[1].name or "Usuario");return true end
  end
 end
 local function open(id)
