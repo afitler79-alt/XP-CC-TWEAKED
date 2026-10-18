@@ -25,7 +25,20 @@ local function startXP()
   term.setBackgroundColor(colors.black)
   term.setTextColor(colors.white)
   term.clear()
-  shell.run("/sys/kernel.lua")
+  while true do
+    local ok, result = pcall(shell.run, "/sys/kernel.lua")
+    if ok and result ~= false then return end
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(2, 2)
+    print("Windows XP no pudo iniciar el escritorio.")
+    printError(ok and "El kernel termino inesperadamente." or tostring(result))
+    print("")
+    print("Pulsa una tecla para volver al menu.")
+    os.pullEventRaw()
+    return
+  end
 end
 
 local autoStart = readAutoStart()
@@ -583,7 +596,7 @@ end
 local function redraw()
  W,H=term.getSize()
  -- window.create necesita un terminal nativo. El espejo sirve para
- -- duplicar salida, pero algunos monitores/terminales móviles lo rechazan
+ -- duplicar salida, pero algunos monitores/terminales mÃ³viles lo rechazan
  -- justo al abandonar el login.
  local parent=baseTerminal
  if not renderSurface or renderParent~=parent or renderWidth~=W or renderHeight~=H then
@@ -614,7 +627,7 @@ local function redraw()
   for y=horizon,H-2 do box(1,y,W,y%2==0 and C.lime or C.green) end
   for x=4,W,9 do box(x,horizon-1,2,2,C.green) end
  else
-  -- Fondo XP clásico.
+  -- Fondo XP clÃ¡sico.
   box(1,1,W,H,wallpaper)
   put(math.max(1,W-9),2,"(o)",C.yellow,C.lightBlue)
   put(math.max(1,W-22),3," .--.  .--. ",C.white,C.lightBlue)
@@ -906,6 +919,11 @@ local function char(c)
  elseif active and active.id=="ide" then ide.char(active.data.ide,c)
  end
 end
+local function safeCreateDevices()
+ local ok,result=pcall(ap.create)
+ if ok and type(result)=="table" then return result end
+ return {}
+end
 local preferredDisplay=nil
 if fs.exists(monitorSetting) then
  local file=fs.open(monitorSetting,"r")
@@ -919,7 +937,7 @@ applyDisplay(preferredDisplay,false)
 term.redirect(mirrorTerminal)
 boot()
 while not logged do if login() then logged=true end end
-createDevices=ap.create()
+createDevices=safeCreateDevices()
 redraw()
 local clockTimer=os.startTimer(1)
 local videoTimer=os.startTimer(0.34)
@@ -957,7 +975,7 @@ while true do
   if changed then redraw() end
   videoTimer=os.startTimer(0.34)
  elseif ev[1]=="timer" and ev[2]==peripheralTimer then
-  createDevices=ap.create();redraw();peripheralTimer=os.startTimer(5)
+  createDevices=safeCreateDevices();redraw();peripheralTimer=os.startTimer(5)
  end
 end
 ]=]
@@ -988,7 +1006,7 @@ end
 return M
 ]=]
 payload["/drivers/peripherals.lua"] = [=[
--- XP Ultimate CC: deteccion segura de perifÃ©ricos (nombres legacy y actuales).
+-- XP Ultimate CC: deteccion segura de perifÃƒÂ©ricos (nombres legacy y actuales).
 local M = {}
 local aliases = {
   player = {"player_detector", "playerDetector"},
@@ -1104,7 +1122,7 @@ end
 
 function M.setSpeed(name, side, speed)
   local p = peripheral.wrap(name)
-  if not p then return false, "PerifÃ©rico desconectado" end
+  if not p then return false, "PerifÃƒÂ©rico desconectado" end
   speed = math.max(-256, math.min(256, math.floor(tonumber(speed) or 0)))
   if type(p.setTargetSpeed) == "function" then
     local ok, err = pcall(p.setTargetSpeed, side, speed)
@@ -2064,3 +2082,4 @@ print("")
 print("Windows XP Ultimate CC instalado.")
 print("Autostart: abre /startup.lua para elegir; la preferencia actual se conserva.")
 print("Reinicia o ejecuta startup para continuar.")
+
